@@ -34,7 +34,8 @@ namespace MoreDispatchMod
 
                 LoadLocalization();
 
-                updateSystem.UpdateAt<ForcePoliceDispatchSystem>(SystemUpdatePhase.GameSimulation);
+                Log.Info($"[Startup] FireAccident={Settings.DispatchFireToAccidents} FireMedical={Settings.DispatchFireToMedicalCalls}");
+
                 updateSystem.UpdateAt<FireToAccidentDispatchSystem>(SystemUpdatePhase.GameSimulation);
                 updateSystem.UpdateAt<FireToMedicalDispatchSystem>(SystemUpdatePhase.GameSimulation);
             }
@@ -55,9 +56,6 @@ namespace MoreDispatchMod
 
                 { $"Options.TAB[{id}.General]", "General" },
                 { $"Options.GROUP[{id}.Dispatch]", "Dispatch" },
-
-                { $"Options.OPTION[{id}.{name}.AlwaysDispatchPoliceToAccidents]", "Police to All Accidents" },
-                { $"Options.OPTION_DESCRIPTION[{id}.{name}.AlwaysDispatchPoliceToAccidents]", "Force police dispatch to ALL car accidents, even low-severity ones that the game would normally skip." },
 
                 { $"Options.OPTION[{id}.{name}.DispatchFireToAccidents]", "Fire Engines to Accidents" },
                 { $"Options.OPTION_DESCRIPTION[{id}.{name}.DispatchFireToAccidents]", "Additionally dispatch fire engines to all car accidents." },

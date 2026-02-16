@@ -14,9 +14,6 @@ namespace MoreDispatchMod.Settings
         public MoreDispatchModSettings(IMod mod) : base(mod) { }
 
         [SettingsUISection("General", "Dispatch")]
-        public bool AlwaysDispatchPoliceToAccidents { get; set; }
-
-        [SettingsUISection("General", "Dispatch")]
         public bool DispatchFireToAccidents { get; set; }
 
         [SettingsUISection("General", "Dispatch")]
@@ -36,7 +33,6 @@ namespace MoreDispatchMod.Settings
 
         public override void SetDefaults()
         {
-            AlwaysDispatchPoliceToAccidents = false;
             DispatchFireToAccidents = false;
             DispatchFireToMedicalCalls = false;
         }

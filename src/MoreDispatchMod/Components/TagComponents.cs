@@ -13,8 +13,10 @@ namespace MoreDispatchMod.Components
     /// <summary>
     /// Marker component added to citizen entities with HealthProblem that already
     /// have a fire rescue request created by this mod, preventing duplicate requests.
+    /// Tracks which building received RescueTarget for proper cleanup.
     /// </summary>
     public struct FireDispatchedToMedical : IComponentData
     {
+        public Entity m_Building;
     }
 }
