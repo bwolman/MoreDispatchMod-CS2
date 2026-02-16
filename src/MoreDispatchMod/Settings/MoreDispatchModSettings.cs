@@ -1,0 +1,44 @@
+using Colossal.IO.AssetDatabase;
+
+using Game.Modding;
+using Game.Settings;
+
+namespace MoreDispatchMod.Settings
+{
+    [FileLocation("MoreDispatchMod")]
+    [SettingsUITabOrder("General")]
+    [SettingsUIGroupOrder("Dispatch")]
+    [SettingsUIShowGroupName]
+    public class MoreDispatchModSettings : ModSetting
+    {
+        public MoreDispatchModSettings(IMod mod) : base(mod) { }
+
+        [SettingsUISection("General", "Dispatch")]
+        public bool AlwaysDispatchPoliceToAccidents { get; set; }
+
+        [SettingsUISection("General", "Dispatch")]
+        public bool DispatchFireToAccidents { get; set; }
+
+        [SettingsUISection("General", "Dispatch")]
+        public bool DispatchFireToMedicalCalls { get; set; }
+
+        [SettingsUISection("General", "Dispatch")]
+        [SettingsUIButton]
+        [SettingsUIConfirmation]
+        public bool ResetSettings
+        {
+            set
+            {
+                SetDefaults();
+                ApplyAndSave();
+            }
+        }
+
+        public override void SetDefaults()
+        {
+            AlwaysDispatchPoliceToAccidents = false;
+            DispatchFireToAccidents = false;
+            DispatchFireToMedicalCalls = false;
+        }
+    }
+}

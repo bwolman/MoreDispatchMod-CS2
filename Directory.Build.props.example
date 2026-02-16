@@ -1,0 +1,7 @@
+<!-- Copy this file to Directory.Build.props and set your game path -->
+<!-- Directory.Build.props is git-ignored — each developer sets their own -->
+<Project>
+  <PropertyGroup>
+    <GamePath>C:\Program Files (x86)\Steam\steamapps\common\Cities Skylines II</GamePath>
+  </PropertyGroup>
+</Project>

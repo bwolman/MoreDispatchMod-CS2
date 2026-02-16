@@ -1,0 +1,24 @@
+# Build output
+bin/
+obj/
+
+# IDE
+.vs/
+.idea/
+.claude/
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config
+Directory.Build.props
+
+# Game DLLs (never commit these)
+*.dll
+!src/**/bin/**/*.dll
+
+# Build artifacts
+*.nupkg
