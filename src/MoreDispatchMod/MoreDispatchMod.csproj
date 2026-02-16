@@ -12,50 +12,50 @@
   <!-- Default game path — override in Directory.Build.props (git-ignored) -->
   <PropertyGroup>
     <GamePath Condition="'$(GamePath)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Cities Skylines II</GamePath>
-    <ManagedPath>$(GamePath)\Cities2_Data\Managed</ManagedPath>
-    <ModsPath>$(LOCALAPPDATA)Low\Colossal Order\Cities Skylines II\Mods\MoreDispatchMod</ModsPath>
+    <ManagedPath>$(GamePath)/Cities2_Data/Managed</ManagedPath>
+    <ModsPath>/Volumes/Users/micro/AppData/locallow/Colossal Order/Cities Skylines II/Mods/MoreDispatchMod</ModsPath>
   </PropertyGroup>
 
   <!-- Game assembly references — do not copy locally -->
   <ItemGroup>
     <Reference Include="Game">
-      <HintPath>$(ManagedPath)\Game.dll</HintPath>
+      <HintPath>$(ManagedPath)/Game.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Colossal.Core">
-      <HintPath>$(ManagedPath)\Colossal.Core.dll</HintPath>
+      <HintPath>$(ManagedPath)/Colossal.Core.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Colossal.Mathematics">
-      <HintPath>$(ManagedPath)\Colossal.Mathematics.dll</HintPath>
+      <HintPath>$(ManagedPath)/Colossal.Mathematics.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Colossal.IO.AssetDatabase">
-      <HintPath>$(ManagedPath)\Colossal.IO.AssetDatabase.dll</HintPath>
+      <HintPath>$(ManagedPath)/Colossal.IO.AssetDatabase.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Colossal.Logging">
-      <HintPath>$(ManagedPath)\Colossal.Logging.dll</HintPath>
+      <HintPath>$(ManagedPath)/Colossal.Logging.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Colossal.Localization">
-      <HintPath>$(ManagedPath)\Colossal.Localization.dll</HintPath>
+      <HintPath>$(ManagedPath)/Colossal.Localization.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.CoreModule">
-      <HintPath>$(ManagedPath)\UnityEngine.CoreModule.dll</HintPath>
+      <HintPath>$(ManagedPath)/UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Unity.Entities">
-      <HintPath>$(ManagedPath)\Unity.Entities.dll</HintPath>
+      <HintPath>$(ManagedPath)/Unity.Entities.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Unity.Collections">
-      <HintPath>$(ManagedPath)\Unity.Collections.dll</HintPath>
+      <HintPath>$(ManagedPath)/Unity.Collections.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Unity.Mathematics">
-      <HintPath>$(ManagedPath)\Unity.Mathematics.dll</HintPath>
+      <HintPath>$(ManagedPath)/Unity.Mathematics.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

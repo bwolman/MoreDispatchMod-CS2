@@ -1,6 +1,7 @@
 using Game;
 using Game.Common;
 using Game.Events;
+using Game.Prefabs;
 using Game.Simulation;
 using Game.Tools;
 
@@ -12,11 +13,7 @@ namespace MoreDispatchMod.Systems
     [UpdateAfter(typeof(AccidentSiteSystem))]
     public partial class ForcePoliceDispatchSystem : GameSystemBase
     {
-        private const int kUpdateInterval = 64;
-
         private EntityQuery m_AccidentQuery;
-        private EntityArchetype m_PoliceRequestArchetype;
-        private uint m_SimulationFrame;
 
         protected override void OnCreate()
         {
@@ -27,23 +24,11 @@ namespace MoreDispatchMod.Systems
                 ComponentType.Exclude<Deleted>(),
                 ComponentType.Exclude<Temp>());
 
-            m_PoliceRequestArchetype = EntityManager.CreateArchetype(
-                ComponentType.ReadWrite<ServiceRequest>(),
-                ComponentType.ReadWrite<PoliceEmergencyRequest>(),
-                ComponentType.ReadWrite<RequestGroup>());
-
             RequireForUpdate(m_AccidentQuery);
         }
 
         protected override void OnUpdate()
         {
-            m_SimulationFrame = SimulationUtils.GetUpdateFrame(m_SimulationFrame, kUpdateInterval, 1);
-            uint frameIndex = EntityManager.GetComponentData<SimulationFrame>(SystemHandle).m_Frame;
-            if (frameIndex % kUpdateInterval != m_SimulationFrame)
-            {
-                return;
-            }
-
             if (!Mod.Settings.AlwaysDispatchPoliceToAccidents)
             {
                 return;
@@ -75,10 +60,11 @@ namespace MoreDispatchMod.Systems
                 // Create police request if none exists
                 if (site.m_PoliceRequest == Entity.Null)
                 {
-                    Entity request = EntityManager.CreateEntity(m_PoliceRequestArchetype);
-                    EntityManager.SetComponentData(request, new PoliceEmergencyRequest(
+                    Entity request = EntityManager.CreateEntity();
+                    EntityManager.AddComponentData(request, new ServiceRequest());
+                    EntityManager.AddComponentData(request, new PoliceEmergencyRequest(
                         entity, entity, 1f, PolicePurpose.Emergency));
-                    EntityManager.SetComponentData(request, new RequestGroup(4u));
+                    EntityManager.AddComponentData(request, new RequestGroup(4u));
 
                     site.m_PoliceRequest = request;
                     EntityManager.SetComponentData(entity, site);

@@ -15,11 +15,7 @@ namespace MoreDispatchMod.Systems
     [UpdateAfter(typeof(HealthProblemSystem))]
     public partial class FireToMedicalDispatchSystem : GameSystemBase
     {
-        private const int kUpdateInterval = 64;
-
         private EntityQuery m_HealthProblemQuery;
-        private EntityArchetype m_FireRescueRequestArchetype;
-        private uint m_SimulationFrame;
 
         protected override void OnCreate()
         {
@@ -31,23 +27,11 @@ namespace MoreDispatchMod.Systems
                 ComponentType.Exclude<Temp>(),
                 ComponentType.Exclude<FireDispatchedToMedical>());
 
-            m_FireRescueRequestArchetype = EntityManager.CreateArchetype(
-                ComponentType.ReadWrite<ServiceRequest>(),
-                ComponentType.ReadWrite<FireRescueRequest>(),
-                ComponentType.ReadWrite<RequestGroup>());
-
             RequireForUpdate(m_HealthProblemQuery);
         }
 
         protected override void OnUpdate()
         {
-            m_SimulationFrame = SimulationUtils.GetUpdateFrame(m_SimulationFrame, kUpdateInterval, 1);
-            uint frameIndex = EntityManager.GetComponentData<SimulationFrame>(SystemHandle).m_Frame;
-            if (frameIndex % kUpdateInterval != m_SimulationFrame)
-            {
-                return;
-            }
-
             if (!Mod.Settings.DispatchFireToMedicalCalls)
             {
                 return;
@@ -72,10 +56,11 @@ namespace MoreDispatchMod.Systems
                 }
 
                 // Create fire rescue request
-                Entity request = EntityManager.CreateEntity(m_FireRescueRequestArchetype);
-                EntityManager.SetComponentData(request, new FireRescueRequest(
+                Entity request = EntityManager.CreateEntity();
+                EntityManager.AddComponentData(request, new ServiceRequest());
+                EntityManager.AddComponentData(request, new FireRescueRequest(
                     entity, 1f, FireRescueRequestType.Disaster));
-                EntityManager.SetComponentData(request, new RequestGroup(4u));
+                EntityManager.AddComponentData(request, new RequestGroup(4u));
 
                 // Mark entity so we don't create duplicate requests
                 EntityManager.AddComponent<FireDispatchedToMedical>(entity);
