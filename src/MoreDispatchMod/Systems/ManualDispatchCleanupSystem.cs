@@ -28,11 +28,13 @@ namespace MoreDispatchMod.Systems
 
             m_PoliceTaggedQuery = GetEntityQuery(
                 ComponentType.ReadOnly<ManualPoliceDispatched>(),
-                ComponentType.Exclude<Deleted>());
+                ComponentType.Exclude<Deleted>(),
+                ComponentType.Exclude<Temp>());
 
             m_FireTaggedQuery = GetEntityQuery(
                 ComponentType.ReadOnly<ManualFireDispatched>(),
-                ComponentType.Exclude<Deleted>());
+                ComponentType.Exclude<Deleted>(),
+                ComponentType.Exclude<Temp>());
         }
 
         protected override void OnUpdate()
