@@ -19,6 +19,7 @@ namespace MoreDispatchMod.Systems
         private EntityQuery m_PoliceTaggedQuery;
         private EntityQuery m_FireTaggedQuery;
         private SimulationSystem m_SimulationSystem;
+        private int m_LogCounter;
 
         protected override void OnCreate()
         {
@@ -39,6 +40,14 @@ namespace MoreDispatchMod.Systems
 
         protected override void OnUpdate()
         {
+            bool shouldLog = false;
+            m_LogCounter++;
+            if (m_LogCounter >= 64)
+            {
+                m_LogCounter = 0;
+                shouldLog = true;
+            }
+
             uint currentFrame = m_SimulationSystem.frameIndex;
             int policeCleaned = 0;
             int fireCleaned = 0;
@@ -94,6 +103,11 @@ namespace MoreDispatchMod.Systems
                 }
             }
             fireEntities.Dispose();
+
+            if (shouldLog)
+            {
+                Mod.Log.Info($"[ManualCleanup] PoliceCleaned={policeCleaned} FireCleaned={fireCleaned}");
+            }
         }
     }
 }
