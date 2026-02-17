@@ -58,9 +58,6 @@ namespace MoreDispatchMod.Systems
             }
             else
             {
-                // Default Police enabled so clicking immediately does something
-                m_DispatchTool.PoliceEnabled = true;
-                m_PoliceEnabled.Update(true);
                 m_ToolSystem.activeTool = m_DispatchTool;
             }
         }

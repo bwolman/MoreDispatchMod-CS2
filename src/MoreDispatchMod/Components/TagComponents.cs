@@ -40,8 +40,9 @@ namespace MoreDispatchMod.Components
     }
 
     /// <summary>
-    /// Marker on buildings that received a manual EMS dispatch.
-    /// Tracks creation frame for timeout cleanup.
+    /// Marker on citizen entities that received a manual EMS dispatch.
+    /// Tracks creation frame for timeout cleanup. HealthProblem is managed by
+    /// the game's AddHealthProblemSystem — we create event entities, not direct components.
     /// </summary>
     public struct ManualEMSDispatched : IComponentData
     {

@@ -1,5 +1,6 @@
 using Game;
 using Game.Buildings;
+using Game.Citizens;
 using Game.Common;
 using Game.Events;
 using Game.Simulation;
@@ -46,6 +47,14 @@ namespace MoreDispatchMod.Systems
 
         protected override void OnUpdate()
         {
+            // Early-out when no tagged entities exist
+            if (m_PoliceTaggedQuery.IsEmptyIgnoreFilter
+                && m_FireTaggedQuery.IsEmptyIgnoreFilter
+                && m_EMSTaggedQuery.IsEmptyIgnoreFilter)
+            {
+                return;
+            }
+
             bool shouldLog = false;
             m_LogCounter++;
             if (m_LogCounter >= 64)
@@ -63,6 +72,9 @@ namespace MoreDispatchMod.Systems
             for (int i = 0; i < policeEntities.Length; i++)
             {
                 Entity entity = policeEntities[i];
+                if (!EntityManager.Exists(entity))
+                    continue;
+
                 ManualPoliceDispatched tag = EntityManager.GetComponentData<ManualPoliceDispatched>(entity);
 
                 bool timedOut = (currentFrame - tag.m_CreationFrame) > TIMEOUT_FRAMES;
@@ -93,6 +105,9 @@ namespace MoreDispatchMod.Systems
             for (int i = 0; i < fireEntities.Length; i++)
             {
                 Entity entity = fireEntities[i];
+                if (!EntityManager.Exists(entity))
+                    continue;
+
                 ManualFireDispatched tag = EntityManager.GetComponentData<ManualFireDispatched>(entity);
 
                 bool timedOut = (currentFrame - tag.m_CreationFrame) > TIMEOUT_FRAMES;
@@ -110,17 +125,32 @@ namespace MoreDispatchMod.Systems
             }
             fireEntities.Dispose();
 
-            // --- EMS cleanup ---
+            // --- EMS cleanup (citizens) ---
+            // HealthProblem is managed by AddHealthProblemSystem — we only track our tag.
+            // The game handles the citizen health lifecycle (ambulance pickup, hospital, recovery).
             int emsCleaned = 0;
             var emsEntities = m_EMSTaggedQuery.ToEntityArray(Allocator.Temp);
             for (int i = 0; i < emsEntities.Length; i++)
             {
-                Entity entity = emsEntities[i];
-                ManualEMSDispatched tag = EntityManager.GetComponentData<ManualEMSDispatched>(entity);
+                Entity citizen = emsEntities[i];
+                if (!EntityManager.Exists(citizen))
+                    continue;
+
+                ManualEMSDispatched tag = EntityManager.GetComponentData<ManualEMSDispatched>(citizen);
+
                 bool timedOut = (currentFrame - tag.m_CreationFrame) > TIMEOUT_FRAMES;
-                if (timedOut)
+
+                // Resolved when citizen no longer needs transport (ambulance picked them up or recovered)
+                bool resolved = !EntityManager.HasComponent<HealthProblem>(citizen);
+                if (!resolved)
                 {
-                    EntityManager.RemoveComponent<ManualEMSDispatched>(entity);
+                    HealthProblem hp = EntityManager.GetComponentData<HealthProblem>(citizen);
+                    resolved = (hp.m_Flags & HealthProblemFlags.RequireTransport) == 0;
+                }
+
+                if (timedOut || resolved)
+                {
+                    EntityManager.RemoveComponent<ManualEMSDispatched>(citizen);
                     emsCleaned++;
                 }
             }

@@ -1,5 +1,6 @@
 using Game;
 using Game.Buildings;
+using Game.Citizens;
 using Game.Common;
 using Game.Events;
 using Game.Input;
@@ -31,6 +32,7 @@ namespace MoreDispatchMod.Systems
         private ToolOutputBarrier m_Barrier;
         private SimulationSystem m_SimulationSystem;
         private EntityQuery m_HighlightedQuery;
+        private EntityQuery m_CitizenQuery;
         private Entity m_PreviousRaycastEntity;
 
         public override PrefabBase GetPrefab()
@@ -53,6 +55,13 @@ namespace MoreDispatchMod.Systems
 
             m_HighlightedQuery = GetEntityQuery(
                 ComponentType.ReadOnly<Highlighted>(),
+                ComponentType.Exclude<Deleted>(),
+                ComponentType.Exclude<Temp>());
+
+            m_CitizenQuery = GetEntityQuery(
+                ComponentType.ReadOnly<Citizen>(),
+                ComponentType.ReadOnly<CurrentBuilding>(),
+                ComponentType.Exclude<ManualEMSDispatched>(),
                 ComponentType.Exclude<Deleted>(),
                 ComponentType.Exclude<Temp>());
         }
@@ -92,10 +101,12 @@ namespace MoreDispatchMod.Systems
             EntityCommandBuffer buffer = m_Barrier.CreateCommandBuffer();
 
             // Remove old highlight if entity changed
+            // BatchesUpdated must be added BEFORE Highlighted is removed,
+            // otherwise the query no longer matches and the renderer won't clear the visual.
             if (!m_HighlightedQuery.IsEmptyIgnoreFilter && hitEntity != m_PreviousRaycastEntity)
             {
-                buffer.RemoveComponent<Highlighted>(m_HighlightedQuery, EntityQueryCaptureMode.AtPlayback);
                 buffer.AddComponent<BatchesUpdated>(m_HighlightedQuery, EntityQueryCaptureMode.AtPlayback);
+                buffer.RemoveComponent<Highlighted>(m_HighlightedQuery, EntityQueryCaptureMode.AtPlayback);
                 m_PreviousRaycastEntity = Entity.Null;
             }
 
@@ -214,22 +225,39 @@ namespace MoreDispatchMod.Systems
             Mod.Log.Info($"[ManualDispatch] Fire dispatched to {entity.Index}");
         }
 
-        private void CreateEMSDispatch(Entity entity, EntityCommandBuffer buffer)
+        private void CreateEMSDispatch(Entity buildingEntity, EntityCommandBuffer buffer)
         {
-            if (EntityManager.HasComponent<ManualEMSDispatched>(entity))
+            uint currentFrame = m_SimulationSystem.frameIndex;
+            var citizens = m_CitizenQuery.ToEntityArray(Allocator.Temp);
+            int dispatched = 0;
+
+            for (int i = 0; i < citizens.Length; i++)
             {
-                Mod.Log.Info($"[ManualDispatch] EMS already dispatched to building {entity.Index}, skipping");
-                return;
+                Entity citizen = citizens[i];
+                CurrentBuilding cb = EntityManager.GetComponentData<CurrentBuilding>(citizen);
+                if (cb.m_CurrentBuilding != buildingEntity)
+                    continue;
+
+                // Create AddHealthProblem event entity — AddHealthProblemSystem handles:
+                // stopping citizen movement, flag merging, trigger events, journal data
+                Entity cmd = buffer.CreateEntity();
+                buffer.AddComponent<Game.Common.Event>(cmd);
+                buffer.AddComponent(cmd, new AddHealthProblem
+                {
+                    m_Event = Entity.Null,
+                    m_Target = citizen,
+                    m_Flags = HealthProblemFlags.Sick | HealthProblemFlags.RequireTransport
+                });
+
+                buffer.AddComponent(citizen, new ManualEMSDispatched
+                {
+                    m_CreationFrame = currentFrame
+                });
+                dispatched++;
             }
 
-            Entity request = buffer.CreateEntity();
-            buffer.AddComponent(request, new ServiceRequest());
-            buffer.AddComponent(request, new HealthcareRequest(entity, HealthcareRequestType.Ambulance));
-            buffer.AddComponent(request, new RequestGroup(REQUEST_GROUP_HEALTHCARE));
-
-            buffer.AddComponent(entity, new ManualEMSDispatched { m_CreationFrame = m_SimulationSystem.frameIndex });
-
-            Mod.Log.Info($"[ManualDispatch] EMS dispatched to building {entity.Index}");
+            citizens.Dispose();
+            Mod.Log.Info($"[ManualDispatch] EMS: dispatched to {dispatched} citizens in building {buildingEntity.Index}");
         }
     }
 }

@@ -5,7 +5,7 @@
     background-color: var(--panelColorNormal);
     border-radius: 4rem;
     padding: 8rem;
-    min-width: 180rem;
+    white-space: nowrap;
     z-index: 100;
     box-shadow: 0 2rem 8rem rgba(0, 0, 0, 0.3);
 }
@@ -32,7 +32,6 @@
     color: var(--textColorNormal);
     font-size: 12rem;
     border-radius: 4rem;
-    width: 100%;
 }
 
 .option.active {
