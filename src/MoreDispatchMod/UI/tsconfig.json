@@ -15,5 +15,6 @@
     "paths": {
       "mod.json": ["../mod.json"]
     }
-  }
+  },
+  "include": ["src"]
 }
