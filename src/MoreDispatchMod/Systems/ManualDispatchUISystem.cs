@@ -49,11 +49,6 @@ namespace MoreDispatchMod.Systems
             m_ToolSystem.EventToolChanged += OnToolChanged;
         }
 
-        protected override void OnUpdate()
-        {
-            base.OnUpdate();
-        }
-
         private void HandleToggleTool()
         {
             if (m_ToolSystem.activeTool == m_DispatchTool)
