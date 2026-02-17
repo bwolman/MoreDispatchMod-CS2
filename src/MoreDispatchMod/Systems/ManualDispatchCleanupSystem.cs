@@ -18,6 +18,7 @@ namespace MoreDispatchMod.Systems
 
         private EntityQuery m_PoliceTaggedQuery;
         private EntityQuery m_FireTaggedQuery;
+        private EntityQuery m_EMSTaggedQuery;
         private SimulationSystem m_SimulationSystem;
         private int m_LogCounter;
 
@@ -34,6 +35,11 @@ namespace MoreDispatchMod.Systems
 
             m_FireTaggedQuery = GetEntityQuery(
                 ComponentType.ReadOnly<ManualFireDispatched>(),
+                ComponentType.Exclude<Deleted>(),
+                ComponentType.Exclude<Temp>());
+
+            m_EMSTaggedQuery = GetEntityQuery(
+                ComponentType.ReadOnly<ManualEMSDispatched>(),
                 ComponentType.Exclude<Deleted>(),
                 ComponentType.Exclude<Temp>());
         }
@@ -104,9 +110,25 @@ namespace MoreDispatchMod.Systems
             }
             fireEntities.Dispose();
 
+            // --- EMS cleanup ---
+            int emsCleaned = 0;
+            var emsEntities = m_EMSTaggedQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < emsEntities.Length; i++)
+            {
+                Entity entity = emsEntities[i];
+                ManualEMSDispatched tag = EntityManager.GetComponentData<ManualEMSDispatched>(entity);
+                bool timedOut = (currentFrame - tag.m_CreationFrame) > TIMEOUT_FRAMES;
+                if (timedOut)
+                {
+                    EntityManager.RemoveComponent<ManualEMSDispatched>(entity);
+                    emsCleaned++;
+                }
+            }
+            emsEntities.Dispose();
+
             if (shouldLog)
             {
-                Mod.Log.Info($"[ManualCleanup] PoliceCleaned={policeCleaned} FireCleaned={fireCleaned}");
+                Mod.Log.Info($"[ManualCleanup] PoliceCleaned={policeCleaned} FireCleaned={fireCleaned} EMSCleaned={emsCleaned}");
             }
         }
     }
