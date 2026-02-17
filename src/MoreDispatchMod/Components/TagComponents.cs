@@ -38,4 +38,13 @@ namespace MoreDispatchMod.Components
     {
         public uint m_CreationFrame;
     }
+
+    /// <summary>
+    /// Marker on buildings that received a manual EMS dispatch.
+    /// Tracks creation frame for timeout cleanup.
+    /// </summary>
+    public struct ManualEMSDispatched : IComponentData
+    {
+        public uint m_CreationFrame;
+    }
 }

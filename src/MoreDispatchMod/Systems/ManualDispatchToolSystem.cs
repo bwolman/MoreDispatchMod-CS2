@@ -208,10 +208,18 @@ namespace MoreDispatchMod.Systems
 
         private void CreateEMSDispatch(Entity entity, EntityCommandBuffer buffer)
         {
+            if (EntityManager.HasComponent<ManualEMSDispatched>(entity))
+            {
+                Mod.Log.Info($"[ManualDispatch] EMS already dispatched to building {entity.Index}, skipping");
+                return;
+            }
+
             Entity request = buffer.CreateEntity();
             buffer.AddComponent(request, new ServiceRequest());
             buffer.AddComponent(request, new HealthcareRequest(entity, HealthcareRequestType.Ambulance));
             buffer.AddComponent(request, new RequestGroup(16u));
+
+            buffer.AddComponent(entity, new ManualEMSDispatched { m_CreationFrame = m_SimulationSystem.frameIndex });
 
             Mod.Log.Info($"[ManualDispatch] EMS dispatched to building {entity.Index}");
         }
