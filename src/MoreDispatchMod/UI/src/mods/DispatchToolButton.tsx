@@ -14,7 +14,7 @@ export const DispatchToolButton = () => {
             onSelect={toggleTool}
         >
             <img
-                src="coui://uil/Standard/StarFilled.svg"
+                src="coui://uil/Standard/Emergency.svg"
                 className={styles.icon}
                 alt="Dispatch"
             />
