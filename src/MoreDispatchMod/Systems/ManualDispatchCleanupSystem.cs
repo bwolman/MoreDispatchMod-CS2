@@ -81,14 +81,14 @@ namespace MoreDispatchMod.Systems
                 ManualFireDispatched tag = EntityManager.GetComponentData<ManualFireDispatched>(entity);
 
                 bool timedOut = (currentFrame - tag.m_CreationFrame) > TIMEOUT_FRAMES;
+                bool alreadyResolved = !EntityManager.HasComponent<RescueTarget>(entity);
 
-                if (timedOut)
+                if (timedOut || alreadyResolved)
                 {
-                    if (EntityManager.HasComponent<RescueTarget>(entity))
+                    if (!alreadyResolved && EntityManager.HasComponent<RescueTarget>(entity))
                     {
                         EntityManager.RemoveComponent<RescueTarget>(entity);
                     }
-
                     EntityManager.RemoveComponent<ManualFireDispatched>(entity);
                     fireCleaned++;
                 }
