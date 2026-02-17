@@ -114,17 +114,17 @@ namespace MoreDispatchMod.Systems
 
                 if (PoliceEnabled && (isBuilding || isVehicle))
                 {
-                    CreatePoliceDispatch(hitEntity);
+                    CreatePoliceDispatch(hitEntity, buffer);
                 }
 
                 if (FireEnabled && (isBuilding || isVehicle))
                 {
-                    CreateFireDispatch(hitEntity);
+                    CreateFireDispatch(hitEntity, buffer);
                 }
 
                 if (EMSEnabled && isCitizen)
                 {
-                    CreateEMSDispatch(hitEntity);
+                    CreateEMSDispatch(hitEntity, buffer);
                 }
 
                 Mod.Log.Info($"[ManualDispatch] Click entity={hitEntity.Index} building={isBuilding} vehicle={isVehicle} citizen={isCitizen} police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled}");
@@ -133,7 +133,7 @@ namespace MoreDispatchMod.Systems
             return inputDeps;
         }
 
-        private void CreatePoliceDispatch(Entity entity)
+        private void CreatePoliceDispatch(Entity entity, EntityCommandBuffer buffer)
         {
             uint currentFrame = m_SimulationSystem.frameIndex;
 
@@ -141,7 +141,7 @@ namespace MoreDispatchMod.Systems
             bool addedSite = false;
             if (!EntityManager.HasComponent<AccidentSite>(entity))
             {
-                EntityManager.AddComponentData(entity, new AccidentSite
+                buffer.AddComponent(entity, new AccidentSite
                 {
                     m_Event = Entity.Null,
                     m_PoliceRequest = Entity.Null,
@@ -160,16 +160,16 @@ namespace MoreDispatchMod.Systems
             }
 
             // Create police emergency request
-            Entity request = EntityManager.CreateEntity();
-            EntityManager.AddComponentData(request, new ServiceRequest());
-            EntityManager.AddComponentData(request, new PoliceEmergencyRequest(
+            Entity request = buffer.CreateEntity();
+            buffer.AddComponent(request, new ServiceRequest());
+            buffer.AddComponent(request, new PoliceEmergencyRequest(
                 entity, entity, 5f, PolicePurpose.Emergency));
-            EntityManager.AddComponentData(request, new RequestGroup(4u));
+            buffer.AddComponent(request, new RequestGroup(4u));
 
             // Tag for cleanup
             if (!EntityManager.HasComponent<ManualPoliceDispatched>(entity))
             {
-                EntityManager.AddComponentData(entity, new ManualPoliceDispatched
+                buffer.AddComponent(entity, new ManualPoliceDispatched
                 {
                     m_CreationFrame = currentFrame,
                     m_AddedAccidentSite = addedSite
@@ -179,27 +179,27 @@ namespace MoreDispatchMod.Systems
             Mod.Log.Info($"[ManualDispatch] Police dispatched to {entity.Index} (addedSite={addedSite})");
         }
 
-        private void CreateFireDispatch(Entity entity)
+        private void CreateFireDispatch(Entity entity, EntityCommandBuffer buffer)
         {
             uint currentFrame = m_SimulationSystem.frameIndex;
 
             // Add RescueTarget if not present
             if (!EntityManager.HasComponent<RescueTarget>(entity))
             {
-                EntityManager.AddComponentData(entity, new RescueTarget(Entity.Null));
+                buffer.AddComponent(entity, new RescueTarget(Entity.Null));
             }
 
             // Create fire rescue request
-            Entity request = EntityManager.CreateEntity();
-            EntityManager.AddComponentData(request, new ServiceRequest());
-            EntityManager.AddComponentData(request, new FireRescueRequest(
+            Entity request = buffer.CreateEntity();
+            buffer.AddComponent(request, new ServiceRequest());
+            buffer.AddComponent(request, new FireRescueRequest(
                 entity, 1f, FireRescueRequestType.Disaster));
-            EntityManager.AddComponentData(request, new RequestGroup(4u));
+            buffer.AddComponent(request, new RequestGroup(4u));
 
             // Tag for cleanup
             if (!EntityManager.HasComponent<ManualFireDispatched>(entity))
             {
-                EntityManager.AddComponentData(entity, new ManualFireDispatched
+                buffer.AddComponent(entity, new ManualFireDispatched
                 {
                     m_CreationFrame = currentFrame
                 });
@@ -208,7 +208,7 @@ namespace MoreDispatchMod.Systems
             Mod.Log.Info($"[ManualDispatch] Fire dispatched to {entity.Index}");
         }
 
-        private void CreateEMSDispatch(Entity entity)
+        private void CreateEMSDispatch(Entity entity, EntityCommandBuffer buffer)
         {
             // Validate citizen has HealthProblem with RequireTransport
             if (!EntityManager.HasComponent<HealthProblem>(entity))
@@ -230,10 +230,10 @@ namespace MoreDispatchMod.Systems
                 : HealthcareRequestType.Ambulance;
 
             // Create healthcare request
-            Entity request = EntityManager.CreateEntity();
-            EntityManager.AddComponentData(request, new ServiceRequest());
-            EntityManager.AddComponentData(request, new HealthcareRequest(entity, type));
-            EntityManager.AddComponentData(request, new RequestGroup(16u));
+            Entity request = buffer.CreateEntity();
+            buffer.AddComponent(request, new ServiceRequest());
+            buffer.AddComponent(request, new HealthcareRequest(entity, type));
+            buffer.AddComponent(request, new RequestGroup(16u));
 
             Mod.Log.Info($"[ManualDispatch] EMS ({type}) dispatched to {entity.Index}");
         }
