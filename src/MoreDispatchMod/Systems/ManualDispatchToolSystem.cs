@@ -151,8 +151,13 @@ namespace MoreDispatchMod.Systems
             }
             else
             {
-                // Set RequirePolice on existing AccidentSite
+                // Set RequirePolice on existing AccidentSite, but skip if request already pending
                 AccidentSite site = EntityManager.GetComponentData<AccidentSite>(entity);
+                if (site.m_PoliceRequest != Entity.Null && EntityManager.Exists(site.m_PoliceRequest))
+                {
+                    Mod.Log.Info($"[ManualDispatch] Police request already pending for {entity.Index}, skipping");
+                    return;
+                }
                 site.m_Flags |= AccidentSiteFlags.RequirePolice;
                 EntityManager.SetComponentData(entity, site);
             }
