@@ -1,6 +1,5 @@
 using Game;
 using Game.Buildings;
-using Game.Citizens;
 using Game.Common;
 using Game.Events;
 using Game.Input;
@@ -110,7 +109,6 @@ namespace MoreDispatchMod.Systems
             {
                 bool isBuilding = EntityManager.HasComponent<Building>(hitEntity);
                 bool isVehicle = EntityManager.HasComponent<Vehicle>(hitEntity);
-                bool isCitizen = EntityManager.HasComponent<Citizen>(hitEntity);
 
                 if (PoliceEnabled && (isBuilding || isVehicle))
                 {
@@ -122,12 +120,12 @@ namespace MoreDispatchMod.Systems
                     CreateFireDispatch(hitEntity, buffer);
                 }
 
-                if (EMSEnabled && isCitizen)
+                if (EMSEnabled && isBuilding)
                 {
                     CreateEMSDispatch(hitEntity, buffer);
                 }
 
-                Mod.Log.Info($"[ManualDispatch] Click entity={hitEntity.Index} building={isBuilding} vehicle={isVehicle} citizen={isCitizen} police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled}");
+                Mod.Log.Info($"[ManualDispatch] Click entity={hitEntity.Index} building={isBuilding} vehicle={isVehicle} police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled}");
             }
 
             return inputDeps;
@@ -210,32 +208,12 @@ namespace MoreDispatchMod.Systems
 
         private void CreateEMSDispatch(Entity entity, EntityCommandBuffer buffer)
         {
-            // Validate citizen has HealthProblem with RequireTransport
-            if (!EntityManager.HasComponent<HealthProblem>(entity))
-            {
-                Mod.Log.Info($"[ManualDispatch] EMS skipped {entity.Index}: no HealthProblem");
-                return;
-            }
-
-            HealthProblem problem = EntityManager.GetComponentData<HealthProblem>(entity);
-            if ((problem.m_Flags & HealthProblemFlags.RequireTransport) == 0)
-            {
-                Mod.Log.Info($"[ManualDispatch] EMS skipped {entity.Index}: no RequireTransport flag");
-                return;
-            }
-
-            // Determine ambulance or hearse
-            HealthcareRequestType type = (problem.m_Flags & HealthProblemFlags.Dead) != 0
-                ? HealthcareRequestType.Hearse
-                : HealthcareRequestType.Ambulance;
-
-            // Create healthcare request
             Entity request = buffer.CreateEntity();
             buffer.AddComponent(request, new ServiceRequest());
-            buffer.AddComponent(request, new HealthcareRequest(entity, type));
+            buffer.AddComponent(request, new HealthcareRequest(entity, HealthcareRequestType.Ambulance));
             buffer.AddComponent(request, new RequestGroup(16u));
 
-            Mod.Log.Info($"[ManualDispatch] EMS ({type}) dispatched to {entity.Index}");
+            Mod.Log.Info($"[ManualDispatch] EMS dispatched to building {entity.Index}");
         }
     }
 }
