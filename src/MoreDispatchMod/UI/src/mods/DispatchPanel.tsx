@@ -29,7 +29,7 @@ export const DispatchPanel = () => {
                     selected={policeOn}
                     onSelect={togglePolice}
                 >
-                    <img src="coui://uil/Standard/Police.svg" className={styles.optionIcon} />
+                    <img src="coui://uil/Standard/Police.svg" className={styles.optionIcon} alt="Police" />
                     <span>Police</span>
                 </Button>
                 <Button
@@ -38,7 +38,7 @@ export const DispatchPanel = () => {
                     selected={fireOn}
                     onSelect={toggleFire}
                 >
-                    <img src="coui://uil/Standard/FireSafety.svg" className={styles.optionIcon} />
+                    <img src="coui://uil/Standard/FireSafety.svg" className={styles.optionIcon} alt="Fire" />
                     <span>Fire</span>
                 </Button>
                 <Button
@@ -47,7 +47,7 @@ export const DispatchPanel = () => {
                     selected={emsOn}
                     onSelect={toggleEMS}
                 >
-                    <img src="coui://uil/Standard/Healthcare.svg" className={styles.optionIcon} />
+                    <img src="coui://uil/Standard/Healthcare.svg" className={styles.optionIcon} alt="EMS" />
                     <span>EMS</span>
                 </Button>
             </div>

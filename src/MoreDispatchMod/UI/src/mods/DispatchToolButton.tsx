@@ -16,6 +16,7 @@ export const DispatchToolButton = () => {
             <img
                 src="coui://uil/Standard/StarFilled.svg"
                 className={styles.icon}
+                alt="Dispatch"
             />
         </Button>
     );
