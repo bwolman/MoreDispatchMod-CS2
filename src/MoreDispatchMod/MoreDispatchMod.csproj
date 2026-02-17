@@ -58,12 +58,17 @@
       <HintPath>$(ManagedPath)/Unity.Mathematics.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Colossal.UI.Binding">
+      <HintPath>$(ManagedPath)/Colossal.UI.Binding.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <!-- Auto-deploy to game Mods folder after build -->
   <Target Name="DeployMod" AfterTargets="Build">
     <MakeDir Directories="$(ModsPath)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModsPath)" />
+    <Copy SourceFiles="UI/mod.json" DestinationFolder="$(ModsPath)" Condition="Exists('UI/mod.json')" />
   </Target>
 
 </Project>

@@ -1,0 +1,44 @@
+.panel {
+    position: absolute;
+    top: 50rem;
+    left: 10rem;
+    background-color: var(--panelColorNormal);
+    border-radius: 4rem;
+    padding: 6rem;
+    min-width: 180rem;
+    z-index: 100;
+}
+
+.header {
+    color: var(--textColorNormal);
+    font-size: 14rem;
+    font-weight: bold;
+    padding: 4rem 8rem;
+    margin-bottom: 4rem;
+}
+
+.options {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.option {
+    display: flex;
+    align-items: center;
+    gap: 8rem;
+    padding: 6rem 8rem;
+    color: var(--textColorNormal);
+    font-size: 12rem;
+    border-radius: 4rem;
+    width: 100%;
+}
+
+.option.active {
+    background-color: var(--accentColorNormal);
+}
+
+.optionIcon {
+    width: 20rem;
+    height: 20rem;
+}

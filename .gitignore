@@ -22,3 +22,7 @@ Directory.Build.props
 
 # Build artifacts
 *.nupkg
+
+# Node / UI build
+node_modules/
+package-lock.json

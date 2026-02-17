@@ -19,4 +19,23 @@ namespace MoreDispatchMod.Components
     {
         public Entity m_Building;
     }
+
+    /// <summary>
+    /// Marker on entities that received a manual police dispatch.
+    /// Tracks creation frame for timeout cleanup and whether we added AccidentSite.
+    /// </summary>
+    public struct ManualPoliceDispatched : IComponentData
+    {
+        public uint m_CreationFrame;
+        public bool m_AddedAccidentSite;
+    }
+
+    /// <summary>
+    /// Marker on entities that received a manual fire dispatch.
+    /// Tracks creation frame for timeout cleanup.
+    /// </summary>
+    public struct ManualFireDispatched : IComponentData
+    {
+        public uint m_CreationFrame;
+    }
 }

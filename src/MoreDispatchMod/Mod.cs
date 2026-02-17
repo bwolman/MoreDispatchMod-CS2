@@ -38,6 +38,9 @@ namespace MoreDispatchMod
 
                 updateSystem.UpdateAt<FireToAccidentDispatchSystem>(SystemUpdatePhase.GameSimulation);
                 updateSystem.UpdateAt<FireToMedicalDispatchSystem>(SystemUpdatePhase.GameSimulation);
+                updateSystem.UpdateAt<ManualDispatchCleanupSystem>(SystemUpdatePhase.GameSimulation);
+                updateSystem.UpdateAt<ManualDispatchToolSystem>(SystemUpdatePhase.ToolUpdate);
+                updateSystem.UpdateAt<ManualDispatchUISystem>(SystemUpdatePhase.UIUpdate);
             }
             catch (Exception ex)
             {
