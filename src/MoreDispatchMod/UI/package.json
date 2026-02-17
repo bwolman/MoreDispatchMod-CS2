@@ -1,4 +1,5 @@
 {
+  "name": "more-dispatch-mod-ui",
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "engines": {
