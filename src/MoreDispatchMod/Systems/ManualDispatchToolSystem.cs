@@ -25,6 +25,9 @@ namespace MoreDispatchMod.Systems
         public bool FireEnabled { get; set; }
         public bool EMSEnabled { get; set; }
 
+        private const uint REQUEST_GROUP_EMERGENCY = 4u;
+        private const uint REQUEST_GROUP_HEALTHCARE = 16u;
+
         private ToolOutputBarrier m_Barrier;
         private SimulationSystem m_SimulationSystem;
         private EntityQuery m_HighlightedQuery;
@@ -167,7 +170,7 @@ namespace MoreDispatchMod.Systems
             buffer.AddComponent(request, new ServiceRequest());
             buffer.AddComponent(request, new PoliceEmergencyRequest(
                 entity, entity, 5f, PolicePurpose.Emergency));
-            buffer.AddComponent(request, new RequestGroup(4u));
+            buffer.AddComponent(request, new RequestGroup(REQUEST_GROUP_EMERGENCY));
 
             // Tag for cleanup
             if (!EntityManager.HasComponent<ManualPoliceDispatched>(entity))
@@ -197,7 +200,7 @@ namespace MoreDispatchMod.Systems
             buffer.AddComponent(request, new ServiceRequest());
             buffer.AddComponent(request, new FireRescueRequest(
                 entity, 1f, FireRescueRequestType.Disaster));
-            buffer.AddComponent(request, new RequestGroup(4u));
+            buffer.AddComponent(request, new RequestGroup(REQUEST_GROUP_EMERGENCY));
 
             // Tag for cleanup
             if (!EntityManager.HasComponent<ManualFireDispatched>(entity))
@@ -222,7 +225,7 @@ namespace MoreDispatchMod.Systems
             Entity request = buffer.CreateEntity();
             buffer.AddComponent(request, new ServiceRequest());
             buffer.AddComponent(request, new HealthcareRequest(entity, HealthcareRequestType.Ambulance));
-            buffer.AddComponent(request, new RequestGroup(16u));
+            buffer.AddComponent(request, new RequestGroup(REQUEST_GROUP_HEALTHCARE));
 
             buffer.AddComponent(entity, new ManualEMSDispatched { m_CreationFrame = m_SimulationSystem.frameIndex });
 
