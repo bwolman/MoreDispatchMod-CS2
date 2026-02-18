@@ -7,7 +7,6 @@ using Game.Input;
 using Game.Objects;
 using Game.Pathfind;
 using Game.Prefabs;
-using Game.Rendering;
 using Game.Simulation;
 using Game.Tools;
 using Game.Vehicles;
@@ -134,7 +133,7 @@ namespace MoreDispatchMod.Systems
             bool raycastHit = GetRaycastResult(out Entity hitEntity, out RaycastHit hit);
 
             // --- Highlight management ---
-            // Highlighted/BatchesUpdated are vanilla components — safe to add to rendered entities via ECB.
+            // Highlighted/BatchesUpdated are vanilla components used by all tool systems.
             EntityCommandBuffer ecb = m_Barrier.CreateCommandBuffer();
 
             if (!m_HighlightedQuery.IsEmptyIgnoreFilter && hitEntity != m_PreviousRaycastEntity)
@@ -152,6 +151,10 @@ namespace MoreDispatchMod.Systems
             }
 
             // --- Dispatch on click ---
+            // IMPORTANT: NO structural changes on rendered entities (buildings/vehicles) here.
+            // All AddComponent calls on rendered entities are deferred to
+            // ManualDispatchCleanupSystem which runs at GameSimulation phase
+            // (safe sync point where rendering is not active).
             if (raycastHit && hitEntity != Entity.Null && applyAction.WasReleasedThisFrame())
             {
                 bool isBuilding = EntityManager.HasComponent<Building>(hitEntity);
@@ -162,12 +165,12 @@ namespace MoreDispatchMod.Systems
 
                 if (PoliceEnabled && (isBuilding || isVehicle))
                 {
-                    CreatePoliceDispatch(hitEntity, ecb);
+                    CreatePoliceDispatch(hitEntity);
                 }
 
                 if (FireEnabled && (isBuilding || isVehicle))
                 {
-                    CreateFireDispatch(hitEntity, ecb);
+                    CreateFireDispatch(hitEntity);
                 }
 
                 if (EMSEnabled && isBuilding)
@@ -177,14 +180,14 @@ namespace MoreDispatchMod.Systems
 
                 if (CrimeEnabled && isBuilding)
                 {
-                    CreateCrimeDispatch(hitEntity, ecb);
+                    CreateCrimeDispatch(hitEntity);
                 }
             }
 
             return inputDeps;
         }
 
-        private void CreatePoliceDispatch(Entity entity, EntityCommandBuffer ecb)
+        private void CreatePoliceDispatch(Entity entity)
         {
             uint currentFrame = m_SimulationSystem.frameIndex;
 
@@ -334,11 +337,8 @@ namespace MoreDispatchMod.Systems
                 EntityManager.SetComponentData(bestCar, currentLane);
             }
 
-            // EffectsUpdated is a vanilla component — safe to add via ECB
-            if (!EntityManager.HasComponent<EffectsUpdated>(bestCar))
-            {
-                ecb.AddComponent<EffectsUpdated>(bestCar);
-            }
+            // EffectsUpdated deferred to ManualDispatchCleanupSystem (GameSimulation phase)
+            // to avoid structural changes on rendered entities during tool update.
 
             // Create a NON-RENDERED tracker entity for our tag.
             // NEVER add custom components to rendered entities (buildings/vehicles) —
@@ -364,7 +364,7 @@ namespace MoreDispatchMod.Systems
             Mod.Log.Info($"[ManualDispatch] Police car {bestCar.Index} dispatched to {entity.Index} (tracker={tracker.Index})");
         }
 
-        private void CreateFireDispatch(Entity entity, EntityCommandBuffer ecb)
+        private void CreateFireDispatch(Entity entity)
         {
             uint currentFrame = m_SimulationSystem.frameIndex;
 
@@ -388,14 +388,10 @@ namespace MoreDispatchMod.Systems
                 return;
             }
 
-            bool hadRescueTarget = EntityManager.HasComponent<RescueTarget>(entity);
-            Mod.Log.Info($"[ManualDispatch] Fire: entity={entity.Index} hadRescueTarget={hadRescueTarget}");
+            Mod.Log.Info($"[ManualDispatch] Fire: entity={entity.Index}");
 
-            // RescueTarget is a vanilla component — safe to add via ECB
-            if (!hadRescueTarget)
-            {
-                ecb.AddComponent(entity, new RescueTarget(Entity.Null));
-            }
+            // RescueTarget deferred to ManualDispatchCleanupSystem (GameSimulation phase)
+            // to avoid structural changes on rendered entities during tool update.
 
             // Create fire rescue request (non-rendered — safe for direct EntityManager)
             Entity request = EntityManager.CreateEntity();
@@ -483,7 +479,7 @@ namespace MoreDispatchMod.Systems
             Mod.Log.Info($"[ManualDispatch] EMS: dispatched to {dispatched} of {totalInBuilding} citizens in building {buildingEntity.Index}");
         }
 
-        private void CreateCrimeDispatch(Entity buildingEntity, EntityCommandBuffer ecb)
+        private void CreateCrimeDispatch(Entity buildingEntity)
         {
             uint currentFrame = m_SimulationSystem.frameIndex;
 
@@ -538,15 +534,8 @@ namespace MoreDispatchMod.Systems
 
             Mod.Log.Info($"[ManualDispatch] Crime: created event entity {eventEntity.Index} with PrefabRef → {crimePrefab.Index}");
 
-            // AccidentSite is a vanilla component — safe to add via ECB
-            ecb.AddComponent(buildingEntity, new AccidentSite
-            {
-                m_Event = eventEntity,
-                m_PoliceRequest = Entity.Null,
-                m_Flags = AccidentSiteFlags.CrimeScene | AccidentSiteFlags.CrimeDetected,
-                m_CreationFrame = currentFrame,
-                m_SecuredFrame = 0
-            });
+            // AccidentSite deferred to ManualDispatchCleanupSystem (GameSimulation phase)
+            // to avoid structural changes on rendered entities during tool update.
 
             // Non-rendered tracker entity
             Entity tracker = EntityManager.CreateEntity();
@@ -557,7 +546,7 @@ namespace MoreDispatchMod.Systems
                 m_EventEntity = eventEntity
             });
 
-            Mod.Log.Info($"[ManualDispatch] Crime scene created at building {buildingEntity.Index} (tracker={tracker.Index})");
+            Mod.Log.Info($"[ManualDispatch] Crime tracker created for building {buildingEntity.Index} (tracker={tracker.Index})");
         }
     }
 }

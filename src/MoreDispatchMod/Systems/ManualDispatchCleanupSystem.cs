@@ -3,6 +3,7 @@ using Game.Buildings;
 using Game.Citizens;
 using Game.Common;
 using Game.Events;
+using Game.Rendering;
 using Game.Simulation;
 using Game.Tools;
 using Game.Vehicles;
@@ -66,14 +67,85 @@ namespace MoreDispatchMod.Systems
 
             uint currentFrame = m_SimulationSystem.frameIndex;
             int policeCleaned = 0;
+            int fireApplied = 0;
             int fireCleaned = 0;
             int emsCleaned = 0;
+            int crimeApplied = 0;
             int crimeCleaned = 0;
 
-            // --- Police cleanup ---
-            // Tracker entities reference: target building, police car, request entity.
-            // Clean up when car is gone, returning, or timeout.
+            // =====================================================================
+            // APPLY PHASE — add deferred structural changes to rendered entities.
+            // These were NOT done in the tool system to avoid crashing
+            // BatchUploadSystem (rendering jobs hold references to entity chunks
+            // during the tool update phase). GameSimulation phase is a safe sync
+            // point where rendering is not active.
+            // =====================================================================
+
+            // --- Police: add EffectsUpdated to car ---
             var policeTrackers = m_PoliceTrackerQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < policeTrackers.Length; i++)
+            {
+                Entity tracker = policeTrackers[i];
+                ManualPoliceDispatched tag = EntityManager.GetComponentData<ManualPoliceDispatched>(tracker);
+                Entity carEntity = tag.m_PoliceCarEntity;
+
+                if (carEntity != Entity.Null && EntityManager.Exists(carEntity)
+                    && EntityManager.HasComponent<PoliceCar>(carEntity)
+                    && !EntityManager.HasComponent<EffectsUpdated>(carEntity))
+                {
+                    EntityManager.AddComponent<EffectsUpdated>(carEntity);
+                }
+            }
+            // Don't dispose — reused in cleanup below
+
+            // --- Fire: add RescueTarget to building ---
+            var fireTrackers = m_FireTrackerQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < fireTrackers.Length; i++)
+            {
+                Entity tracker = fireTrackers[i];
+                ManualFireDispatched tag = EntityManager.GetComponentData<ManualFireDispatched>(tracker);
+                Entity targetEntity = tag.m_TargetEntity;
+
+                if (targetEntity != Entity.Null && EntityManager.Exists(targetEntity)
+                    && !EntityManager.HasComponent<RescueTarget>(targetEntity))
+                {
+                    EntityManager.AddComponentData(targetEntity, new RescueTarget(Entity.Null));
+                    fireApplied++;
+                }
+            }
+            // Don't dispose — reused in cleanup below
+
+            // --- Crime: add AccidentSite to building ---
+            var crimeTrackers = m_CrimeTrackerQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < crimeTrackers.Length; i++)
+            {
+                Entity tracker = crimeTrackers[i];
+                ManualCrimeDispatched tag = EntityManager.GetComponentData<ManualCrimeDispatched>(tracker);
+                Entity targetEntity = tag.m_TargetEntity;
+
+                if (targetEntity != Entity.Null && EntityManager.Exists(targetEntity)
+                    && !EntityManager.HasComponent<AccidentSite>(targetEntity))
+                {
+                    EntityManager.AddComponentData(targetEntity, new AccidentSite
+                    {
+                        m_Event = tag.m_EventEntity,
+                        m_PoliceRequest = Entity.Null,
+                        m_Flags = AccidentSiteFlags.CrimeScene | AccidentSiteFlags.CrimeDetected,
+                        m_CreationFrame = tag.m_CreationFrame,
+                        m_SecuredFrame = 0
+                    });
+                    EntityManager.AddComponent<BatchesUpdated>(targetEntity);
+                    crimeApplied++;
+                    Mod.Log.Info($"[ManualCleanup] Crime applied: AccidentSite added to building {targetEntity.Index}");
+                }
+            }
+            // Don't dispose — reused in cleanup below
+
+            // =====================================================================
+            // CLEANUP PHASE — remove tracker entities when dispatch is resolved.
+            // =====================================================================
+
+            // --- Police cleanup ---
             for (int i = 0; i < policeTrackers.Length; i++)
             {
                 Entity tracker = policeTrackers[i];
@@ -109,14 +181,12 @@ namespace MoreDispatchMod.Systems
                     Mod.Log.Info($"[ManualCleanup] Police cleanup: tracker={tracker.Index} car={carEntity.Index} " +
                         $"reason={reason} age={currentFrame - tag.m_CreationFrame}");
 
-                    // Destroy our request entity
                     Entity requestEntity = tag.m_RequestEntity;
                     if (requestEntity != Entity.Null && EntityManager.Exists(requestEntity))
                     {
                         EntityManager.DestroyEntity(requestEntity);
                     }
 
-                    // Destroy the tracker entity itself
                     EntityManager.DestroyEntity(tracker);
                     policeCleaned++;
                 }
@@ -124,9 +194,6 @@ namespace MoreDispatchMod.Systems
             policeTrackers.Dispose();
 
             // --- Fire cleanup ---
-            // Tracker entities reference: target building.
-            // Clean up when RescueTarget is gone (vanilla resolved) or timeout.
-            var fireTrackers = m_FireTrackerQuery.ToEntityArray(Allocator.Temp);
             for (int i = 0; i < fireTrackers.Length; i++)
             {
                 Entity tracker = fireTrackers[i];
@@ -139,7 +206,6 @@ namespace MoreDispatchMod.Systems
 
                 if (timedOut || targetGone || alreadyResolved)
                 {
-                    // If timed out, remove RescueTarget from the building
                     if (!targetGone && !alreadyResolved && EntityManager.HasComponent<RescueTarget>(targetEntity))
                     {
                         EntityManager.RemoveComponent<RescueTarget>(targetEntity);
@@ -152,8 +218,6 @@ namespace MoreDispatchMod.Systems
             fireTrackers.Dispose();
 
             // --- EMS cleanup ---
-            // Tracker entities reference: citizen entity.
-            // Clean up when citizen no longer needs transport or timeout.
             var emsTrackers = m_EMSTrackerQuery.ToEntityArray(Allocator.Temp);
             for (int i = 0; i < emsTrackers.Length; i++)
             {
@@ -187,12 +251,12 @@ namespace MoreDispatchMod.Systems
             emsTrackers.Dispose();
 
             // --- Crime cleanup ---
-            // Tracker entities reference: target building, event entity.
-            // AccidentSiteSystem manages AccidentSite lifecycle. Clean up when AccidentSite is gone or timeout.
-            var crimeTrackers = m_CrimeTrackerQuery.ToEntityArray(Allocator.Temp);
             for (int i = 0; i < crimeTrackers.Length; i++)
             {
                 Entity tracker = crimeTrackers[i];
+                if (!EntityManager.Exists(tracker))
+                    continue;
+
                 ManualCrimeDispatched tag = EntityManager.GetComponentData<ManualCrimeDispatched>(tracker);
                 Entity targetEntity = tag.m_TargetEntity;
 
@@ -214,13 +278,11 @@ namespace MoreDispatchMod.Systems
                     Mod.Log.Info($"[ManualCleanup] Crime cleanup: tracker={tracker.Index} target={targetEntity.Index} " +
                         $"reason={reason} age={currentFrame - tag.m_CreationFrame}");
 
-                    // If timed out, remove AccidentSite ourselves
                     if (!targetGone && !resolved && EntityManager.HasComponent<AccidentSite>(targetEntity))
                     {
                         EntityManager.RemoveComponent<AccidentSite>(targetEntity);
                     }
 
-                    // Destroy our event entity
                     Entity eventEntity = tag.m_EventEntity;
                     if (eventEntity != Entity.Null && EntityManager.Exists(eventEntity))
                     {
@@ -235,8 +297,8 @@ namespace MoreDispatchMod.Systems
 
             if (shouldLog)
             {
-                Mod.Log.Info($"[ManualCleanup] PoliceCleaned={policeCleaned} FireCleaned={fireCleaned} " +
-                    $"EMSCleaned={emsCleaned} CrimeCleaned={crimeCleaned}");
+                Mod.Log.Info($"[ManualCleanup] Applied: fire={fireApplied} crime={crimeApplied} | " +
+                    $"Cleaned: police={policeCleaned} fire={fireCleaned} ems={emsCleaned} crime={crimeCleaned}");
             }
         }
     }
