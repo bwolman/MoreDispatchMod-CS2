@@ -6,10 +6,12 @@ import {
     policeEnabled$,
     fireEnabled$,
     emsEnabled$,
+    crimeEnabled$,
     toggleTool,
     togglePolice,
     toggleFire,
     toggleEMS,
+    toggleCrime,
 } from "./bindings";
 import styles from "./DispatchToolButton.module.scss";
 
@@ -19,6 +21,7 @@ export const DispatchToolButton = () => {
     const policeOn = useValue(policeEnabled$);
     const fireOn = useValue(fireEnabled$);
     const emsOn = useValue(emsEnabled$);
+    const crimeOn = useValue(crimeEnabled$);
 
     return (
         <>
@@ -66,6 +69,15 @@ export const DispatchToolButton = () => {
                         >
                             <img src="coui://uil/Standard/Healthcare.svg" className={styles.optionIcon} />
                             <span>EMS</span>
+                        </Button>
+                        <Button
+                            variant="flat"
+                            className={`${styles.option} ${crimeOn ? styles.active : ""}`}
+                            selected={crimeOn}
+                            onSelect={toggleCrime}
+                        >
+                            <img src="coui://uil/Standard/Crime.svg" className={styles.optionIcon} />
+                            <span>Crime</span>
                         </Button>
                     </div>
                 </div>

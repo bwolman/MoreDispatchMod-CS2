@@ -21,44 +21,43 @@ namespace MoreDispatchMod.Components
     }
 
     /// <summary>
-    /// Marker on entities that received a manual police dispatch.
-    /// Tracks creation frame for timeout cleanup, the police car entity
-    /// that received the ServiceDispatch, and the request entity for cleanup.
+    /// Tracker for manual police dispatch. Lives on a separate non-rendered entity
+    /// (NOT on the building/vehicle) to avoid archetype changes on rendered entities
+    /// that crash BatchUploadSystem.
     /// </summary>
     public struct ManualPoliceDispatched : IComponentData
     {
         public uint m_CreationFrame;
+        public Entity m_TargetEntity;
         public Entity m_PoliceCarEntity;
         public Entity m_RequestEntity;
     }
 
     /// <summary>
-    /// Marker on entities that received a manual fire dispatch.
-    /// Tracks creation frame for timeout cleanup.
+    /// Tracker for manual fire dispatch. Lives on a separate non-rendered entity.
     /// </summary>
     public struct ManualFireDispatched : IComponentData
     {
         public uint m_CreationFrame;
+        public Entity m_TargetEntity;
     }
 
     /// <summary>
-    /// Marker on citizen entities that received a manual EMS dispatch.
-    /// Tracks creation frame for timeout cleanup. HealthProblem is managed by
-    /// the game's AddHealthProblemSystem — we create event entities, not direct components.
+    /// Tracker for manual EMS dispatch. Lives on a separate non-rendered entity.
     /// </summary>
     public struct ManualEMSDispatched : IComponentData
     {
         public uint m_CreationFrame;
+        public Entity m_CitizenEntity;
     }
 
     /// <summary>
-    /// Marker on building entities that received a manual crime dispatch.
-    /// AccidentSiteSystem manages the AccidentSite lifecycle — we track the event entity
-    /// for cleanup when vanilla removes the AccidentSite.
+    /// Tracker for manual crime dispatch. Lives on a separate non-rendered entity.
     /// </summary>
     public struct ManualCrimeDispatched : IComponentData
     {
         public uint m_CreationFrame;
+        public Entity m_TargetEntity;
         public Entity m_EventEntity;
     }
 }
