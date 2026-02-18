@@ -22,12 +22,14 @@ namespace MoreDispatchMod.Components
 
     /// <summary>
     /// Marker on entities that received a manual police dispatch.
-    /// Tracks creation frame for timeout cleanup and whether we added AccidentSite.
+    /// Tracks creation frame for timeout cleanup, the police car entity
+    /// that received the ServiceDispatch, and the request entity for cleanup.
     /// </summary>
     public struct ManualPoliceDispatched : IComponentData
     {
         public uint m_CreationFrame;
-        public bool m_AddedAccidentSite;
+        public Entity m_PoliceCarEntity;
+        public Entity m_RequestEntity;
     }
 
     /// <summary>
@@ -47,5 +49,16 @@ namespace MoreDispatchMod.Components
     public struct ManualEMSDispatched : IComponentData
     {
         public uint m_CreationFrame;
+    }
+
+    /// <summary>
+    /// Marker on building entities that received a manual crime dispatch.
+    /// AccidentSiteSystem manages the AccidentSite lifecycle — we track the event entity
+    /// for cleanup when vanilla removes the AccidentSite.
+    /// </summary>
+    public struct ManualCrimeDispatched : IComponentData
+    {
+        public uint m_CreationFrame;
+        public Entity m_EventEntity;
     }
 }

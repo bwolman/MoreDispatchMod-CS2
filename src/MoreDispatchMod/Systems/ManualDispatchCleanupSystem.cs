@@ -5,6 +5,7 @@ using Game.Common;
 using Game.Events;
 using Game.Simulation;
 using Game.Tools;
+using Game.Vehicles;
 
 using MoreDispatchMod.Components;
 
@@ -20,6 +21,7 @@ namespace MoreDispatchMod.Systems
         private EntityQuery m_PoliceTaggedQuery;
         private EntityQuery m_FireTaggedQuery;
         private EntityQuery m_EMSTaggedQuery;
+        private EntityQuery m_CrimeTaggedQuery;
         private SimulationSystem m_SimulationSystem;
         private int m_LogCounter;
 
@@ -43,6 +45,11 @@ namespace MoreDispatchMod.Systems
                 ComponentType.ReadOnly<ManualEMSDispatched>(),
                 ComponentType.Exclude<Deleted>(),
                 ComponentType.Exclude<Temp>());
+
+            m_CrimeTaggedQuery = GetEntityQuery(
+                ComponentType.ReadOnly<ManualCrimeDispatched>(),
+                ComponentType.Exclude<Deleted>(),
+                ComponentType.Exclude<Temp>());
         }
 
         protected override void OnUpdate()
@@ -50,7 +57,8 @@ namespace MoreDispatchMod.Systems
             // Early-out when no tagged entities exist
             if (m_PoliceTaggedQuery.IsEmptyIgnoreFilter
                 && m_FireTaggedQuery.IsEmptyIgnoreFilter
-                && m_EMSTaggedQuery.IsEmptyIgnoreFilter)
+                && m_EMSTaggedQuery.IsEmptyIgnoreFilter
+                && m_CrimeTaggedQuery.IsEmptyIgnoreFilter)
             {
                 return;
             }
@@ -66,8 +74,11 @@ namespace MoreDispatchMod.Systems
             uint currentFrame = m_SimulationSystem.frameIndex;
             int policeCleaned = 0;
             int fireCleaned = 0;
+            int crimeCleaned = 0;
 
             // --- Police cleanup ---
+            // Car drives to target via normal patrol pathfinding (no AccidentTarget).
+            // SelectNextDispatch processes our request, car arrives and returns.
             var policeEntities = m_PoliceTaggedQuery.ToEntityArray(Allocator.Temp);
             for (int i = 0; i < policeEntities.Length; i++)
             {
@@ -76,22 +87,43 @@ namespace MoreDispatchMod.Systems
                     continue;
 
                 ManualPoliceDispatched tag = EntityManager.GetComponentData<ManualPoliceDispatched>(entity);
+                Entity carEntity = tag.m_PoliceCarEntity;
 
                 bool timedOut = (currentFrame - tag.m_CreationFrame) > TIMEOUT_FRAMES;
-                bool secured = false;
+                bool carGone = carEntity == Entity.Null || !EntityManager.Exists(carEntity)
+                               || !EntityManager.HasComponent<PoliceCar>(carEntity);
 
-                if (EntityManager.HasComponent<AccidentSite>(entity))
+                // Diagnostic logging every 64 frames
+                if (shouldLog && !carGone)
                 {
-                    AccidentSite site = EntityManager.GetComponentData<AccidentSite>(entity);
-                    secured = (site.m_Flags & AccidentSiteFlags.Secured) != 0;
+                    PoliceCar pcLog = EntityManager.GetComponentData<PoliceCar>(carEntity);
+                    Car carLog = EntityManager.GetComponentData<Car>(carEntity);
+                    uint age = currentFrame - tag.m_CreationFrame;
+                    Mod.Log.Info($"[ManualCleanup] DIAG police car={carEntity.Index} state=0x{(uint)pcLog.m_State:X} " +
+                        $"carFlags=0x{(uint)carLog.m_Flags:X} age={age}");
                 }
 
-                if (timedOut || secured)
+                // Wait at least 2 seconds before checking car state
+                bool gracePeriodPassed = (currentFrame - tag.m_CreationFrame) > 120;
+                bool carReturning = false;
+
+                if (!carGone && gracePeriodPassed)
                 {
-                    // Remove AccidentSite only if we added it
-                    if (tag.m_AddedAccidentSite && EntityManager.HasComponent<AccidentSite>(entity))
+                    PoliceCar pc = EntityManager.GetComponentData<PoliceCar>(carEntity);
+                    carReturning = (pc.m_State & PoliceCarFlags.Returning) != 0;
+                }
+
+                if (timedOut || carGone || carReturning)
+                {
+                    string reason = timedOut ? "timeout" : carGone ? "carGone" : "returning";
+                    Mod.Log.Info($"[ManualCleanup] Police cleanup: car={carEntity.Index} reason={reason} " +
+                        $"age={currentFrame - tag.m_CreationFrame}");
+
+                    // Destroy our request entity
+                    Entity requestEntity = tag.m_RequestEntity;
+                    if (requestEntity != Entity.Null && EntityManager.Exists(requestEntity))
                     {
-                        EntityManager.RemoveComponent<AccidentSite>(entity);
+                        EntityManager.DestroyEntity(requestEntity);
                     }
 
                     EntityManager.RemoveComponent<ManualPoliceDispatched>(entity);
@@ -156,9 +188,58 @@ namespace MoreDispatchMod.Systems
             }
             emsEntities.Dispose();
 
+            // --- Crime cleanup ---
+            // AccidentSiteSystem manages the AccidentSite lifecycle (crime duration, police dispatch,
+            // secured state, removal). We clean up our tag and event entity when AccidentSite is gone.
+            var crimeEntities = m_CrimeTaggedQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < crimeEntities.Length; i++)
+            {
+                Entity entity = crimeEntities[i];
+                if (!EntityManager.Exists(entity))
+                    continue;
+
+                ManualCrimeDispatched tag = EntityManager.GetComponentData<ManualCrimeDispatched>(entity);
+
+                bool timedOut = (currentFrame - tag.m_CreationFrame) > TIMEOUT_FRAMES;
+                // Vanilla AccidentSiteSystem removes AccidentSite after crime resolves
+                bool resolved = !EntityManager.HasComponent<AccidentSite>(entity);
+
+                if (shouldLog && !resolved)
+                {
+                    AccidentSite accSite = EntityManager.GetComponentData<AccidentSite>(entity);
+                    uint age = currentFrame - tag.m_CreationFrame;
+                    Mod.Log.Info($"[ManualCleanup] DIAG crime entity={entity.Index} flags=0x{(uint)accSite.m_Flags:X} age={age}");
+                }
+
+                if (timedOut || resolved)
+                {
+                    string reason = timedOut ? "timeout" : "resolved";
+                    Mod.Log.Info($"[ManualCleanup] Crime cleanup: entity={entity.Index} reason={reason} " +
+                        $"age={currentFrame - tag.m_CreationFrame}");
+
+                    // If timed out, remove AccidentSite ourselves
+                    if (!resolved && EntityManager.HasComponent<AccidentSite>(entity))
+                    {
+                        EntityManager.RemoveComponent<AccidentSite>(entity);
+                    }
+
+                    // Destroy our event entity
+                    Entity eventEntity = tag.m_EventEntity;
+                    if (eventEntity != Entity.Null && EntityManager.Exists(eventEntity))
+                    {
+                        EntityManager.DestroyEntity(eventEntity);
+                    }
+
+                    EntityManager.RemoveComponent<ManualCrimeDispatched>(entity);
+                    crimeCleaned++;
+                }
+            }
+            crimeEntities.Dispose();
+
             if (shouldLog)
             {
-                Mod.Log.Info($"[ManualCleanup] PoliceCleaned={policeCleaned} FireCleaned={fireCleaned} EMSCleaned={emsCleaned}");
+                Mod.Log.Info($"[ManualCleanup] PoliceCleaned={policeCleaned} FireCleaned={fireCleaned} " +
+                    $"EMSCleaned={emsCleaned} CrimeCleaned={crimeCleaned}");
             }
         }
     }

@@ -10,3 +10,62 @@
     width: 24rem;
     height: 24rem;
 }
+
+.panel {
+    position: absolute;
+    top: 40rem;
+    background-color: var(--panelColorNormal);
+    backdrop-filter: var(--panelBlur);
+    border-radius: 4rem;
+    padding: 8rem;
+    white-space: nowrap;
+    z-index: 10;
+    box-shadow: 0 2rem 8rem rgba(0, 0, 0, 0.3);
+    animation: scale-up-center 0.25s ease;
+}
+
+@keyframes scale-up-center {
+    0% {
+        transform: scaleY(0);
+        transform-origin: top;
+        opacity: 0;
+    }
+    100% {
+        transform: scaleY(1);
+        transform-origin: top;
+        opacity: 1;
+    }
+}
+
+.header {
+    color: var(--textColorNormal);
+    font-size: 14rem;
+    font-weight: bold;
+    padding: 4rem 8rem;
+    margin-bottom: 4rem;
+}
+
+.options {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.option {
+    display: flex;
+    align-items: center;
+    gap: 8rem;
+    padding: 6rem 8rem;
+    color: var(--textColorNormal);
+    font-size: 12rem;
+    border-radius: 4rem;
+}
+
+.option.active {
+    background-color: var(--accentColorNormal);
+}
+
+.optionIcon {
+    width: 20rem;
+    height: 20rem;
+}

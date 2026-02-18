@@ -22,11 +22,14 @@ namespace MoreDispatchMod.Systems
         private ValueBinding<bool> m_PoliceEnabled;
         private ValueBinding<bool> m_FireEnabled;
         private ValueBinding<bool> m_EMSEnabled;
+        private ValueBinding<bool> m_CrimeEnabled;
         private ValueBinding<bool> m_PanelVisible;
 
         protected override void OnCreate()
         {
             base.OnCreate();
+
+            Mod.Log.Info("[ManualDispatchUI] OnCreate");
 
             m_ToolSystem = World.GetOrCreateSystemManaged<ToolSystem>();
             m_DefaultToolSystem = World.GetOrCreateSystemManaged<DefaultToolSystem>();
@@ -37,6 +40,7 @@ namespace MoreDispatchMod.Systems
             AddBinding(m_PoliceEnabled = new ValueBinding<bool>(kGroup, "PoliceEnabled", false));
             AddBinding(m_FireEnabled = new ValueBinding<bool>(kGroup, "FireEnabled", false));
             AddBinding(m_EMSEnabled = new ValueBinding<bool>(kGroup, "EMSEnabled", false));
+            AddBinding(m_CrimeEnabled = new ValueBinding<bool>(kGroup, "CrimeEnabled", false));
             AddBinding(m_PanelVisible = new ValueBinding<bool>(kGroup, "PanelVisible", false));
 
             // Trigger bindings (JS → C#)
@@ -44,6 +48,9 @@ namespace MoreDispatchMod.Systems
             AddBinding(new TriggerBinding(kGroup, "TogglePolice", HandleTogglePolice));
             AddBinding(new TriggerBinding(kGroup, "ToggleFire", HandleToggleFire));
             AddBinding(new TriggerBinding(kGroup, "ToggleEMS", HandleToggleEMS));
+            AddBinding(new TriggerBinding(kGroup, "ToggleCrime", HandleToggleCrime));
+
+            Mod.Log.Info("[ManualDispatchUI] Bindings registered: IsToolActive, PoliceEnabled, FireEnabled, EMSEnabled, CrimeEnabled, PanelVisible, ToggleTool, TogglePolice, ToggleFire, ToggleEMS, ToggleCrime");
 
             // Track external tool changes (Escape key, other tool selected)
             m_ToolSystem.EventToolChanged += OnToolChanged;
@@ -51,13 +58,16 @@ namespace MoreDispatchMod.Systems
 
         private void HandleToggleTool()
         {
+            Mod.Log.Info($"[ManualDispatchUI] HandleToggleTool called, current activeTool={m_ToolSystem.activeTool?.toolID ?? "null"}");
             if (m_ToolSystem.activeTool == m_DispatchTool)
             {
                 // Deactivate
+                Mod.Log.Info("[ManualDispatchUI] Deactivating dispatch tool");
                 m_ToolSystem.activeTool = m_DefaultToolSystem;
             }
             else
             {
+                Mod.Log.Info("[ManualDispatchUI] Activating dispatch tool");
                 m_ToolSystem.activeTool = m_DispatchTool;
             }
         }
@@ -66,6 +76,7 @@ namespace MoreDispatchMod.Systems
         {
             m_DispatchTool.PoliceEnabled = !m_DispatchTool.PoliceEnabled;
             m_PoliceEnabled.Update(m_DispatchTool.PoliceEnabled);
+            Mod.Log.Info($"[ManualDispatchUI] HandleTogglePolice → {m_DispatchTool.PoliceEnabled}");
             DeactivateIfNoneEnabled();
         }
 
@@ -73,6 +84,7 @@ namespace MoreDispatchMod.Systems
         {
             m_DispatchTool.FireEnabled = !m_DispatchTool.FireEnabled;
             m_FireEnabled.Update(m_DispatchTool.FireEnabled);
+            Mod.Log.Info($"[ManualDispatchUI] HandleToggleFire → {m_DispatchTool.FireEnabled}");
             DeactivateIfNoneEnabled();
         }
 
@@ -80,12 +92,21 @@ namespace MoreDispatchMod.Systems
         {
             m_DispatchTool.EMSEnabled = !m_DispatchTool.EMSEnabled;
             m_EMSEnabled.Update(m_DispatchTool.EMSEnabled);
+            Mod.Log.Info($"[ManualDispatchUI] HandleToggleEMS → {m_DispatchTool.EMSEnabled}");
+            DeactivateIfNoneEnabled();
+        }
+
+        private void HandleToggleCrime()
+        {
+            m_DispatchTool.CrimeEnabled = !m_DispatchTool.CrimeEnabled;
+            m_CrimeEnabled.Update(m_DispatchTool.CrimeEnabled);
+            Mod.Log.Info($"[ManualDispatchUI] HandleToggleCrime → {m_DispatchTool.CrimeEnabled}");
             DeactivateIfNoneEnabled();
         }
 
         private void DeactivateIfNoneEnabled()
         {
-            if (!m_DispatchTool.PoliceEnabled && !m_DispatchTool.FireEnabled && !m_DispatchTool.EMSEnabled)
+            if (!m_DispatchTool.PoliceEnabled && !m_DispatchTool.FireEnabled && !m_DispatchTool.EMSEnabled && !m_DispatchTool.CrimeEnabled)
             {
                 if (m_ToolSystem.activeTool == m_DispatchTool)
                 {
@@ -97,6 +118,7 @@ namespace MoreDispatchMod.Systems
         private void OnToolChanged(ToolBaseSystem tool)
         {
             bool isActive = tool == m_DispatchTool;
+            Mod.Log.Info($"[ManualDispatchUI] OnToolChanged → {tool?.toolID ?? "null"}, isDispatchTool={isActive}");
             m_IsToolActive.Update(isActive);
             m_PanelVisible.Update(isActive);
 
@@ -106,9 +128,12 @@ namespace MoreDispatchMod.Systems
                 m_DispatchTool.PoliceEnabled = false;
                 m_DispatchTool.FireEnabled = false;
                 m_DispatchTool.EMSEnabled = false;
+                m_DispatchTool.CrimeEnabled = false;
                 m_PoliceEnabled.Update(false);
                 m_FireEnabled.Update(false);
                 m_EMSEnabled.Update(false);
+                m_CrimeEnabled.Update(false);
+                Mod.Log.Info("[ManualDispatchUI] Tool deactivated, all toggles reset");
             }
         }
     }

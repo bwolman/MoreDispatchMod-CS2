@@ -4,6 +4,8 @@ using Game.Citizens;
 using Game.Common;
 using Game.Events;
 using Game.Input;
+using Game.Objects;
+using Game.Pathfind;
 using Game.Prefabs;
 using Game.Rendering;
 using Game.Simulation;
@@ -15,6 +17,7 @@ using MoreDispatchMod.Components;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Mathematics;
 
 namespace MoreDispatchMod.Systems
 {
@@ -25,14 +28,16 @@ namespace MoreDispatchMod.Systems
         public bool PoliceEnabled { get; set; }
         public bool FireEnabled { get; set; }
         public bool EMSEnabled { get; set; }
+        public bool CrimeEnabled { get; set; }
 
         private const uint REQUEST_GROUP_EMERGENCY = 4u;
-        private const uint REQUEST_GROUP_HEALTHCARE = 16u;
 
         private ToolOutputBarrier m_Barrier;
         private SimulationSystem m_SimulationSystem;
         private EntityQuery m_HighlightedQuery;
         private EntityQuery m_CitizenQuery;
+        private EntityQuery m_PoliceCarQuery;
+        private EntityQuery m_CrimePrefabQuery;
         private Entity m_PreviousRaycastEntity;
 
         public override PrefabBase GetPrefab()
@@ -64,6 +69,19 @@ namespace MoreDispatchMod.Systems
                 ComponentType.Exclude<ManualEMSDispatched>(),
                 ComponentType.Exclude<Deleted>(),
                 ComponentType.Exclude<Temp>());
+
+            m_PoliceCarQuery = GetEntityQuery(
+                ComponentType.ReadOnly<Game.Vehicles.PoliceCar>(),
+                ComponentType.ReadOnly<Game.Objects.Transform>(),
+                ComponentType.ReadOnly<ServiceDispatch>(),
+                ComponentType.Exclude<Deleted>(),
+                ComponentType.Exclude<Temp>());
+
+            m_CrimePrefabQuery = GetEntityQuery(
+                ComponentType.ReadOnly<CrimeData>(),
+                ComponentType.ReadOnly<PrefabData>());
+
+            Mod.Log.Info("[ManualDispatchTool] OnCreate complete");
         }
 
         protected override void OnStartRunning()
@@ -71,11 +89,13 @@ namespace MoreDispatchMod.Systems
             base.OnStartRunning();
             applyAction.shouldBeEnabled = true;
             m_PreviousRaycastEntity = Entity.Null;
+            Mod.Log.Info($"[ManualDispatchTool] OnStartRunning — police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled}");
         }
 
         protected override void OnStopRunning()
         {
             base.OnStopRunning();
+            Mod.Log.Info("[ManualDispatchTool] OnStopRunning — clearing highlights");
 
             // Remove all highlighting we added
             if (!m_HighlightedQuery.IsEmptyIgnoreFilter)
@@ -126,97 +146,152 @@ namespace MoreDispatchMod.Systems
 
                 if (PoliceEnabled && (isBuilding || isVehicle))
                 {
-                    CreatePoliceDispatch(hitEntity, buffer);
+                    CreatePoliceDispatch(hitEntity);
                 }
 
                 if (FireEnabled && (isBuilding || isVehicle))
                 {
-                    CreateFireDispatch(hitEntity, buffer);
+                    CreateFireDispatch(hitEntity);
                 }
 
                 if (EMSEnabled && isBuilding)
                 {
-                    CreateEMSDispatch(hitEntity, buffer);
+                    CreateEMSDispatch(hitEntity);
                 }
 
-                Mod.Log.Info($"[ManualDispatch] Click entity={hitEntity.Index} building={isBuilding} vehicle={isVehicle} police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled}");
+                if (CrimeEnabled && isBuilding)
+                {
+                    CreateCrimeDispatch(hitEntity);
+                }
+
+                Mod.Log.Info($"[ManualDispatch] Click entity={hitEntity.Index} building={isBuilding} vehicle={isVehicle} police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled} crime={CrimeEnabled}");
             }
 
             return inputDeps;
         }
 
-        private void CreatePoliceDispatch(Entity entity, EntityCommandBuffer buffer)
+        private void CreatePoliceDispatch(Entity entity)
         {
             uint currentFrame = m_SimulationSystem.frameIndex;
 
-            // Add AccidentSite if not present
-            bool addedSite = false;
-            if (!EntityManager.HasComponent<AccidentSite>(entity))
+            // Already dispatched to this entity?
+            if (EntityManager.HasComponent<ManualPoliceDispatched>(entity))
             {
-                buffer.AddComponent(entity, new AccidentSite
-                {
-                    m_Event = Entity.Null,
-                    m_PoliceRequest = Entity.Null,
-                    m_Flags = AccidentSiteFlags.RequirePolice | AccidentSiteFlags.TrafficAccident,
-                    m_CreationFrame = currentFrame,
-                    m_SecuredFrame = 0u
-                });
-                addedSite = true;
+                Mod.Log.Info($"[ManualDispatch] Police already dispatched to {entity.Index}, skipping");
+                return;
             }
-            else
+
+            // Find the nearest available police car
+            float3 targetPos = EntityManager.GetComponentData<Game.Objects.Transform>(entity).m_Position;
+            var policeCars = m_PoliceCarQuery.ToEntityArray(Allocator.Temp);
+
+            Entity bestCar = Entity.Null;
+            float bestDistSq = float.MaxValue;
+
+            for (int i = 0; i < policeCars.Length; i++)
             {
-                // Set RequirePolice on existing AccidentSite, but skip if request already pending
-                AccidentSite site = EntityManager.GetComponentData<AccidentSite>(entity);
-                if (site.m_PoliceRequest != Entity.Null && EntityManager.Exists(site.m_PoliceRequest))
+                Entity carEntity = policeCars[i];
+                Game.Vehicles.PoliceCar pc = EntityManager.GetComponentData<Game.Vehicles.PoliceCar>(carEntity);
+
+                // Skip unavailable cars
+                if ((pc.m_State & (PoliceCarFlags.Returning | PoliceCarFlags.AtTarget
+                                 | PoliceCarFlags.ShiftEnded | PoliceCarFlags.Disabled
+                                 | PoliceCarFlags.AccidentTarget)) != 0)
+                    continue;
+                if (pc.m_RequestCount < 1)
+                    continue;
+
+                float3 carPos = EntityManager.GetComponentData<Game.Objects.Transform>(carEntity).m_Position;
+                float distSq = math.distancesq(carPos, targetPos);
+                if (distSq < bestDistSq)
                 {
-                    Mod.Log.Info($"[ManualDispatch] Police request already pending for {entity.Index}, skipping");
-                    return;
+                    bestDistSq = distSq;
+                    bestCar = carEntity;
                 }
-                site.m_Flags |= AccidentSiteFlags.RequirePolice;
-                EntityManager.SetComponentData(entity, site);
             }
+            policeCars.Dispose();
 
-            // Create police emergency request
-            Entity request = buffer.CreateEntity();
-            buffer.AddComponent(request, new ServiceRequest());
-            buffer.AddComponent(request, new PoliceEmergencyRequest(
-                entity, entity, 5f, PolicePurpose.Emergency));
-            buffer.AddComponent(request, new RequestGroup(REQUEST_GROUP_EMERGENCY));
-
-            // Tag for cleanup
-            if (!EntityManager.HasComponent<ManualPoliceDispatched>(entity))
+            if (bestCar == Entity.Null)
             {
-                buffer.AddComponent(entity, new ManualPoliceDispatched
-                {
-                    m_CreationFrame = currentFrame,
-                    m_AddedAccidentSite = addedSite
-                });
+                Mod.Log.Info("[ManualDispatch] No available police cars found");
+                return;
             }
 
-            Mod.Log.Info($"[ManualDispatch] Police dispatched to {entity.Index} (addedSite={addedSite})");
+            // Create request entity — keeps ResetPath from clearing Emergency flags
+            Entity request = EntityManager.CreateEntity();
+            EntityManager.AddComponentData(request, new ServiceRequest());
+            EntityManager.AddComponentData(request, new PoliceEmergencyRequest(
+                entity, entity, 5f, PolicePurpose.Emergency));
+
+            // Inject ServiceDispatch so ResetPath reads our request and maintains Emergency flags
+            DynamicBuffer<ServiceDispatch> dispatches = EntityManager.GetBuffer<ServiceDispatch>(bestCar);
+            dispatches.Clear();
+            dispatches.Add(new ServiceDispatch(request));
+
+            // Set request count to match buffer length
+            Game.Vehicles.PoliceCar policeCar = EntityManager.GetComponentData<Game.Vehicles.PoliceCar>(bestCar);
+            policeCar.m_RequestCount = 1;
+            EntityManager.SetComponentData(bestCar, policeCar);
+
+            // Set emergency car flags — sirens and lights
+            Car car = EntityManager.GetComponentData<Car>(bestCar);
+            car.m_Flags |= CarFlags.Emergency | CarFlags.StayOnRoad | CarFlags.UsePublicTransportLanes;
+            EntityManager.SetComponentData(bestCar, car);
+
+            // Set navigation target
+            EntityManager.SetComponentData(bestCar, new Target(entity));
+
+            // Trigger new pathfinding to our target
+            PathOwner pathOwner = EntityManager.GetComponentData<PathOwner>(bestCar);
+            pathOwner.m_State |= PathFlags.Updated;
+            EntityManager.SetComponentData(bestCar, pathOwner);
+
+            // Clear EndOfPath to prevent false arrival detection before new path arrives
+            if (EntityManager.HasComponent<CarCurrentLane>(bestCar))
+            {
+                CarCurrentLane currentLane = EntityManager.GetComponentData<CarCurrentLane>(bestCar);
+                currentLane.m_LaneFlags &= ~CarLaneFlags.EndOfPath;
+                EntityManager.SetComponentData(bestCar, currentLane);
+            }
+
+            // Trigger rendering update for lights/sirens
+            if (!EntityManager.HasComponent<EffectsUpdated>(bestCar))
+            {
+                EntityManager.AddComponent<EffectsUpdated>(bestCar);
+            }
+
+            // Tag target entity for cleanup tracking
+            EntityManager.AddComponentData(entity, new ManualPoliceDispatched
+            {
+                m_CreationFrame = currentFrame,
+                m_PoliceCarEntity = bestCar,
+                m_RequestEntity = request
+            });
+
+            Mod.Log.Info($"[ManualDispatch] Police car {bestCar.Index} dispatched to {entity.Index}");
         }
 
-        private void CreateFireDispatch(Entity entity, EntityCommandBuffer buffer)
+        private void CreateFireDispatch(Entity entity)
         {
             uint currentFrame = m_SimulationSystem.frameIndex;
 
             // Add RescueTarget if not present
             if (!EntityManager.HasComponent<RescueTarget>(entity))
             {
-                buffer.AddComponent(entity, new RescueTarget(Entity.Null));
+                EntityManager.AddComponentData(entity, new RescueTarget(Entity.Null));
             }
 
             // Create fire rescue request
-            Entity request = buffer.CreateEntity();
-            buffer.AddComponent(request, new ServiceRequest());
-            buffer.AddComponent(request, new FireRescueRequest(
+            Entity request = EntityManager.CreateEntity();
+            EntityManager.AddComponentData(request, new ServiceRequest());
+            EntityManager.AddComponentData(request, new FireRescueRequest(
                 entity, 1f, FireRescueRequestType.Disaster));
-            buffer.AddComponent(request, new RequestGroup(REQUEST_GROUP_EMERGENCY));
+            EntityManager.AddComponentData(request, new RequestGroup(REQUEST_GROUP_EMERGENCY));
 
             // Tag for cleanup
             if (!EntityManager.HasComponent<ManualFireDispatched>(entity))
             {
-                buffer.AddComponent(entity, new ManualFireDispatched
+                EntityManager.AddComponentData(entity, new ManualFireDispatched
                 {
                     m_CreationFrame = currentFrame
                 });
@@ -225,7 +300,7 @@ namespace MoreDispatchMod.Systems
             Mod.Log.Info($"[ManualDispatch] Fire dispatched to {entity.Index}");
         }
 
-        private void CreateEMSDispatch(Entity buildingEntity, EntityCommandBuffer buffer)
+        private void CreateEMSDispatch(Entity buildingEntity)
         {
             uint currentFrame = m_SimulationSystem.frameIndex;
             var citizens = m_CitizenQuery.ToEntityArray(Allocator.Temp);
@@ -240,16 +315,16 @@ namespace MoreDispatchMod.Systems
 
                 // Create AddHealthProblem event entity — AddHealthProblemSystem handles:
                 // stopping citizen movement, flag merging, trigger events, journal data
-                Entity cmd = buffer.CreateEntity();
-                buffer.AddComponent<Game.Common.Event>(cmd);
-                buffer.AddComponent(cmd, new AddHealthProblem
+                Entity cmd = EntityManager.CreateEntity();
+                EntityManager.AddComponentData<Game.Common.Event>(cmd, default);
+                EntityManager.AddComponentData(cmd, new AddHealthProblem
                 {
                     m_Event = Entity.Null,
                     m_Target = citizen,
                     m_Flags = HealthProblemFlags.Sick | HealthProblemFlags.RequireTransport
                 });
 
-                buffer.AddComponent(citizen, new ManualEMSDispatched
+                EntityManager.AddComponentData(citizen, new ManualEMSDispatched
                 {
                     m_CreationFrame = currentFrame
                 });
@@ -258,6 +333,58 @@ namespace MoreDispatchMod.Systems
 
             citizens.Dispose();
             Mod.Log.Info($"[ManualDispatch] EMS: dispatched to {dispatched} citizens in building {buildingEntity.Index}");
+        }
+
+        private void CreateCrimeDispatch(Entity buildingEntity)
+        {
+            uint currentFrame = m_SimulationSystem.frameIndex;
+
+            // Already has a crime dispatch or existing AccidentSite?
+            if (EntityManager.HasComponent<ManualCrimeDispatched>(buildingEntity))
+            {
+                Mod.Log.Info($"[ManualDispatch] Crime already dispatched to {buildingEntity.Index}, skipping");
+                return;
+            }
+            if (EntityManager.HasComponent<AccidentSite>(buildingEntity))
+            {
+                Mod.Log.Info($"[ManualDispatch] Building {buildingEntity.Index} already has AccidentSite, skipping crime");
+                return;
+            }
+
+            // Find a crime event prefab with CrimeData
+            var crimePrefabs = m_CrimePrefabQuery.ToEntityArray(Allocator.Temp);
+            if (crimePrefabs.Length == 0)
+            {
+                crimePrefabs.Dispose();
+                Mod.Log.Warn("[ManualDispatch] No crime prefabs found — cannot create crime scene");
+                return;
+            }
+            Entity crimePrefab = crimePrefabs[0];
+            crimePrefabs.Dispose();
+
+            // Create event entity with PrefabRef pointing to crime prefab
+            Entity eventEntity = EntityManager.CreateEntity();
+            EntityManager.AddComponentData<Game.Common.Event>(eventEntity, default);
+            EntityManager.AddComponentData(eventEntity, new PrefabRef(crimePrefab));
+
+            // Add AccidentSite to building — CrimeScene + CrimeDetected for immediate police dispatch
+            EntityManager.AddComponentData(buildingEntity, new AccidentSite
+            {
+                m_Event = eventEntity,
+                m_PoliceRequest = Entity.Null,
+                m_Flags = AccidentSiteFlags.CrimeScene | AccidentSiteFlags.CrimeDetected,
+                m_CreationFrame = currentFrame,
+                m_SecuredFrame = 0
+            });
+
+            // Tag for cleanup tracking
+            EntityManager.AddComponentData(buildingEntity, new ManualCrimeDispatched
+            {
+                m_CreationFrame = currentFrame,
+                m_EventEntity = eventEntity
+            });
+
+            Mod.Log.Info($"[ManualDispatch] Crime scene created at building {buildingEntity.Index} with prefab {crimePrefab.Index}");
         }
     }
 }

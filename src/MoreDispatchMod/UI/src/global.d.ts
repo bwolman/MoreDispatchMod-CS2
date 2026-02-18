@@ -32,10 +32,14 @@ declare module "cs2/ui" {
         variant?: "floating" | "flat" | "icon" | string;
         className?: string;
         selected?: boolean;
+        src?: string;
         onSelect?: () => void;
         children?: ReactNode;
     }
     export const Button: ComponentType<ButtonProps>;
+    export const Portal: ComponentType<{ children?: ReactNode }>;
+    export const Panel: ComponentType<{ className?: string; header?: ReactNode; children?: ReactNode }>;
+    export const Tooltip: ComponentType<{ tooltip: string; children?: ReactNode }>;
 }
 
 declare module "mod.json" {
