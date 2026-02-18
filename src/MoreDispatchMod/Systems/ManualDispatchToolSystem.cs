@@ -534,8 +534,19 @@ namespace MoreDispatchMod.Systems
 
             Mod.Log.Info($"[ManualDispatch] Crime: created event entity {eventEntity.Index} with PrefabRef → {crimePrefab.Index}");
 
-            // AccidentSite deferred to ManualDispatchCleanupSystem (GameSimulation phase)
-            // to avoid structural changes on rendered entities during tool update.
+            // Create AddAccidentSite command entity (non-rendered — safe for direct EntityManager).
+            // Vanilla AddAccidentSiteSystem will safely add AccidentSite to the building
+            // through the game's rendering-safe pipeline — avoids BatchUploadSystem crash.
+            Entity addSiteCmd = EntityManager.CreateEntity();
+            EntityManager.AddComponentData<Game.Common.Event>(addSiteCmd, default);
+            EntityManager.AddComponentData(addSiteCmd, new AddAccidentSite
+            {
+                m_Event = eventEntity,
+                m_Target = buildingEntity,
+                m_Flags = AccidentSiteFlags.CrimeScene | AccidentSiteFlags.CrimeDetected
+            });
+
+            Mod.Log.Info($"[ManualDispatch] Crime: created AddAccidentSite cmd {addSiteCmd.Index} for building {buildingEntity.Index}");
 
             // Non-rendered tracker entity
             Entity tracker = EntityManager.CreateEntity();

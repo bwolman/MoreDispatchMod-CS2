@@ -3,6 +3,7 @@ using Game.Buildings;
 using Game.Citizens;
 using Game.Common;
 using Game.Events;
+using Game.Objects;
 using Game.Rendering;
 using Game.Simulation;
 using Game.Tools;
@@ -12,12 +13,13 @@ using MoreDispatchMod.Components;
 
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Mathematics;
 
 namespace MoreDispatchMod.Systems
 {
     public partial class ManualDispatchCleanupSystem : GameSystemBase
     {
-        private const uint TIMEOUT_FRAMES = 3600; // ~60 seconds at 60 fps
+        private const uint TIMEOUT_FRAMES = 1800; // ~30 seconds at 60 fps
 
         private EntityQuery m_PoliceTrackerQuery;
         private EntityQuery m_FireTrackerQuery;
@@ -70,7 +72,6 @@ namespace MoreDispatchMod.Systems
             int fireApplied = 0;
             int fireCleaned = 0;
             int emsCleaned = 0;
-            int crimeApplied = 0;
             int crimeCleaned = 0;
 
             // =====================================================================
@@ -81,21 +82,11 @@ namespace MoreDispatchMod.Systems
             // point where rendering is not active.
             // =====================================================================
 
-            // --- Police: add EffectsUpdated to car ---
+            // Police: no apply phase needed — Emergency car flags are set via
+            // SetComponentData in CreatePoliceDispatch() (non-structural, safe).
+            // DO NOT add EffectsUpdated here — it's a structural change on a
+            // rendered entity that crashes BatchUploadSystem.
             var policeTrackers = m_PoliceTrackerQuery.ToEntityArray(Allocator.Temp);
-            for (int i = 0; i < policeTrackers.Length; i++)
-            {
-                Entity tracker = policeTrackers[i];
-                ManualPoliceDispatched tag = EntityManager.GetComponentData<ManualPoliceDispatched>(tracker);
-                Entity carEntity = tag.m_PoliceCarEntity;
-
-                if (carEntity != Entity.Null && EntityManager.Exists(carEntity)
-                    && EntityManager.HasComponent<PoliceCar>(carEntity)
-                    && !EntityManager.HasComponent<EffectsUpdated>(carEntity))
-                {
-                    EntityManager.AddComponent<EffectsUpdated>(carEntity);
-                }
-            }
             // Don't dispose — reused in cleanup below
 
             // --- Fire: add RescueTarget to building ---
@@ -115,30 +106,9 @@ namespace MoreDispatchMod.Systems
             }
             // Don't dispose — reused in cleanup below
 
-            // --- Crime: add AccidentSite to building ---
+            // Crime: AccidentSite is now added via AddAccidentSite command entity
+            // in ManualDispatchToolSystem — vanilla AddAccidentSiteSystem handles it safely.
             var crimeTrackers = m_CrimeTrackerQuery.ToEntityArray(Allocator.Temp);
-            for (int i = 0; i < crimeTrackers.Length; i++)
-            {
-                Entity tracker = crimeTrackers[i];
-                ManualCrimeDispatched tag = EntityManager.GetComponentData<ManualCrimeDispatched>(tracker);
-                Entity targetEntity = tag.m_TargetEntity;
-
-                if (targetEntity != Entity.Null && EntityManager.Exists(targetEntity)
-                    && !EntityManager.HasComponent<AccidentSite>(targetEntity))
-                {
-                    EntityManager.AddComponentData(targetEntity, new AccidentSite
-                    {
-                        m_Event = tag.m_EventEntity,
-                        m_PoliceRequest = Entity.Null,
-                        m_Flags = AccidentSiteFlags.CrimeScene | AccidentSiteFlags.CrimeDetected,
-                        m_CreationFrame = tag.m_CreationFrame,
-                        m_SecuredFrame = 0
-                    });
-                    EntityManager.AddComponent<BatchesUpdated>(targetEntity);
-                    crimeApplied++;
-                    Mod.Log.Info($"[ManualCleanup] Crime applied: AccidentSite added to building {targetEntity.Index}");
-                }
-            }
             // Don't dispose — reused in cleanup below
 
             // =====================================================================
@@ -168,16 +138,31 @@ namespace MoreDispatchMod.Systems
 
                 bool gracePeriodPassed = (currentFrame - tag.m_CreationFrame) > 120;
                 bool carReturning = false;
+                bool closeEnough = false;
 
                 if (!carGone && gracePeriodPassed)
                 {
                     PoliceCar pc = EntityManager.GetComponentData<PoliceCar>(carEntity);
                     carReturning = (pc.m_State & PoliceCarFlags.Returning) != 0;
+
+                    // Proximity check: if car is within 100m of target, consider it arrived.
+                    // Without AccidentTarget, cars near buildings that can't reach the exact
+                    // path end stay in state 0x80 (Empty) indefinitely.
+                    if (!carReturning
+                        && EntityManager.HasComponent<Game.Objects.Transform>(carEntity)
+                        && EntityManager.HasComponent<Game.Objects.Transform>(tag.m_TargetEntity)
+                        && EntityManager.Exists(tag.m_TargetEntity))
+                    {
+                        float3 carPos = EntityManager.GetComponentData<Game.Objects.Transform>(carEntity).m_Position;
+                        float3 targetPos = EntityManager.GetComponentData<Game.Objects.Transform>(tag.m_TargetEntity).m_Position;
+                        float distSq = math.distancesq(carPos, targetPos);
+                        closeEnough = distSq < (100f * 100f);
+                    }
                 }
 
-                if (timedOut || carGone || carReturning)
+                if (timedOut || carGone || carReturning || closeEnough)
                 {
-                    string reason = timedOut ? "timeout" : carGone ? "carGone" : "returning";
+                    string reason = timedOut ? "timeout" : carGone ? "carGone" : carReturning ? "returning" : "closeEnough";
                     Mod.Log.Info($"[ManualCleanup] Police cleanup: tracker={tracker.Index} car={carEntity.Index} " +
                         $"reason={reason} age={currentFrame - tag.m_CreationFrame}");
 
@@ -297,7 +282,7 @@ namespace MoreDispatchMod.Systems
 
             if (shouldLog)
             {
-                Mod.Log.Info($"[ManualCleanup] Applied: fire={fireApplied} crime={crimeApplied} | " +
+                Mod.Log.Info($"[ManualCleanup] Applied: fire={fireApplied} | " +
                     $"Cleaned: police={policeCleaned} fire={fireCleaned} ems={emsCleaned} crime={crimeCleaned}");
             }
         }
