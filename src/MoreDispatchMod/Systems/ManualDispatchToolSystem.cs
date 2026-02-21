@@ -337,8 +337,9 @@ namespace MoreDispatchMod.Systems
                 EntityManager.SetComponentData(bestCar, currentLane);
             }
 
-            // EffectsUpdated deferred to ManualDispatchCleanupSystem (GameSimulation phase)
-            // to avoid structural changes on rendered entities during tool update.
+            // DO NOT add EffectsUpdated to the car — it's a structural change on a
+            // rendered entity that crashes BatchUploadSystem. Emergency car flags
+            // (set via SetComponentData above) are sufficient for sirens/lights.
 
             // Create a NON-RENDERED tracker entity for our tag.
             // NEVER add custom components to rendered entities (buildings/vehicles) —
@@ -527,10 +528,17 @@ namespace MoreDispatchMod.Systems
                 Mod.Log.Info($"[ManualDispatch] Crime: using prefab entity={crimePrefab.Index} prefabIndex={pd.m_Index}");
             }
 
-            // Create event entity with PrefabRef pointing to crime prefab (non-rendered)
+            // Create persistent event entity (non-rendered — safe for direct EntityManager).
+            // Must have Game.Events.Event (persistent marker, NOT Game.Common.Event which is
+            // short-lived and gets destroyed in 1-2 frames), TargetElement buffer (required by
+            // both AddAccidentSiteSystem and AccidentSiteSystem), and PrefabRef (for CrimeData
+            // lookup: alarm delay, crime duration).
             Entity eventEntity = EntityManager.CreateEntity();
-            EntityManager.AddComponentData<Game.Common.Event>(eventEntity, default);
+            EntityManager.AddComponentData<Game.Events.Event>(eventEntity, default);
             EntityManager.AddComponentData(eventEntity, new PrefabRef(crimePrefab));
+            EntityManager.AddBuffer<TargetElement>(eventEntity);
+            EntityManager.AddComponentData<Created>(eventEntity, default);
+            EntityManager.AddComponentData<Updated>(eventEntity, default);
 
             Mod.Log.Info($"[ManualDispatch] Crime: created event entity {eventEntity.Index} with PrefabRef → {crimePrefab.Index}");
 
