@@ -191,20 +191,8 @@ namespace MoreDispatchMod.Systems
         {
             uint currentFrame = m_SimulationSystem.frameIndex;
 
-            // Check if this target already has a police dispatch tracker
+            // Collect already-dispatched car entities to prevent dispatching the same car twice
             var policeTrackers = m_PoliceDispatchedQuery.ToEntityArray(Allocator.Temp);
-            bool alreadyTargeted = false;
-            for (int i = 0; i < policeTrackers.Length; i++)
-            {
-                ManualPoliceDispatched existing = EntityManager.GetComponentData<ManualPoliceDispatched>(policeTrackers[i]);
-                if (existing.m_TargetEntity == entity)
-                {
-                    alreadyTargeted = true;
-                    break;
-                }
-            }
-
-            // Also collect already-dispatched car entities to prevent double dispatch
             int dispatchedCount = policeTrackers.Length;
             Entity[] dispatchedCars = new Entity[dispatchedCount];
             for (int d = 0; d < dispatchedCount; d++)
@@ -213,12 +201,6 @@ namespace MoreDispatchMod.Systems
                 dispatchedCars[d] = existingTag.m_PoliceCarEntity;
             }
             policeTrackers.Dispose();
-
-            if (alreadyTargeted)
-            {
-                Mod.Log.Info($"[ManualDispatch] Police already dispatched to {entity.Index}, skipping");
-                return;
-            }
 
             Mod.Log.Info($"[ManualDispatch] Police: {dispatchedCount} cars already dispatched by mod");
 
