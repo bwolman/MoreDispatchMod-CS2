@@ -14,28 +14,31 @@ namespace MoreDispatchMod.Systems
 {
     public partial class FireToMedicalDispatchSystem : GameSystemBase
     {
-        // Citizens with HealthProblem not yet tagged — candidates for new dispatch
-        private EntityQuery m_UntaggedQuery;
+        // Citizens with HealthProblem in a building — candidates for dispatch
+        private EntityQuery m_CitizenQuery;
 
-        // Citizens we've already tagged — candidates for cleanup
-        private EntityQuery m_TaggedQuery;
+        // Tracker entities — for dedup and cleanup
+        private EntityQuery m_TrackerQuery;
 
+        private EndFrameBarrier m_EndFrameBarrier;
+        private SimulationSystem m_SimulationSystem;
         private int m_LogCounter;
 
         protected override void OnCreate()
         {
             base.OnCreate();
 
-            m_UntaggedQuery = GetEntityQuery(
+            m_EndFrameBarrier = World.GetOrCreateSystemManaged<EndFrameBarrier>();
+            m_SimulationSystem = World.GetOrCreateSystemManaged<SimulationSystem>();
+
+            m_CitizenQuery = GetEntityQuery(
                 ComponentType.ReadOnly<HealthProblem>(),
                 ComponentType.ReadOnly<CurrentBuilding>(),
-                ComponentType.Exclude<FireDispatchedToMedical>(),
                 ComponentType.Exclude<Deleted>(),
                 ComponentType.Exclude<Temp>());
 
-            m_TaggedQuery = GetEntityQuery(
-                ComponentType.ReadOnly<FireDispatchedToMedical>(),
-                ComponentType.Exclude<Deleted>());
+            m_TrackerQuery = GetEntityQuery(
+                ComponentType.ReadOnly<FireMedicalTracker>());
         }
 
         protected override void OnUpdate()
@@ -48,33 +51,39 @@ namespace MoreDispatchMod.Systems
                 shouldLog = true;
             }
 
+            var ecb = m_EndFrameBarrier.CreateCommandBuffer();
+
             int cleaned = 0;
 
             // === CLEANUP (always runs, even if toggle is off) ===
 
-            var taggedEntities = m_TaggedQuery.ToEntityArray(Allocator.Temp);
+            var trackerEntities = m_TrackerQuery.ToEntityArray(Allocator.Temp);
 
-            // First pass: count how many active tags reference each building
-            // so we only remove RescueTarget when the last citizen referencing it is cleaned up
-            var buildingRefCounts = new NativeHashMap<Entity, int>(taggedEntities.Length, Allocator.Temp);
-            var citizensToClean = new NativeList<Entity>(taggedEntities.Length, Allocator.Temp);
+            // Count active tracker references per building so we only remove
+            // RescueTarget when the last citizen referencing it is cleaned up.
+            var buildingRefCounts = new NativeHashMap<Entity, int>(trackerEntities.Length, Allocator.Temp);
+            var trackersToClean = new NativeList<Entity>(trackerEntities.Length, Allocator.Temp);
+            var trackedCitizens = new NativeHashSet<Entity>(trackerEntities.Length, Allocator.Temp);
 
-            for (int i = 0; i < taggedEntities.Length; i++)
+            for (int i = 0; i < trackerEntities.Length; i++)
             {
-                Entity citizen = taggedEntities[i];
-                FireDispatchedToMedical tag = EntityManager.GetComponentData<FireDispatchedToMedical>(citizen);
+                Entity tracker = trackerEntities[i];
+                FireMedicalTracker tag = EntityManager.GetComponentData<FireMedicalTracker>(tracker);
+                Entity citizen = tag.m_CitizenEntity;
 
                 bool needsCleanup = false;
 
-                // Citizen no longer has HealthProblem at all
-                if (!EntityManager.HasComponent<HealthProblem>(citizen))
+                if (citizen == Entity.Null || !EntityManager.Exists(citizen))
+                {
+                    needsCleanup = true;
+                }
+                else if (!EntityManager.HasComponent<HealthProblem>(citizen))
                 {
                     needsCleanup = true;
                 }
                 else
                 {
                     HealthProblem problem = EntityManager.GetComponentData<HealthProblem>(citizen);
-                    // Citizen no longer requires transport (recovered or died)
                     if ((problem.m_Flags & HealthProblemFlags.RequireTransport) == 0)
                     {
                         needsCleanup = true;
@@ -83,48 +92,47 @@ namespace MoreDispatchMod.Systems
 
                 if (needsCleanup)
                 {
-                    citizensToClean.Add(citizen);
+                    trackersToClean.Add(tracker);
                 }
-                else if (tag.m_Building != Entity.Null)
+                else
                 {
-                    // Still active — count this reference
-                    if (buildingRefCounts.TryGetValue(tag.m_Building, out int count))
+                    trackedCitizens.Add(citizen);
+                    if (tag.m_BuildingEntity != Entity.Null)
                     {
-                        buildingRefCounts[tag.m_Building] = count + 1;
-                    }
-                    else
-                    {
-                        buildingRefCounts[tag.m_Building] = 1;
+                        if (buildingRefCounts.TryGetValue(tag.m_BuildingEntity, out int count))
+                            buildingRefCounts[tag.m_BuildingEntity] = count + 1;
+                        else
+                            buildingRefCounts[tag.m_BuildingEntity] = 1;
                     }
                 }
             }
 
-            // Second pass: clean up citizens and conditionally remove RescueTarget from buildings
-            for (int i = 0; i < citizensToClean.Length; i++)
+            // Clean up resolved trackers
+            for (int i = 0; i < trackersToClean.Length; i++)
             {
-                Entity citizen = citizensToClean[i];
-                FireDispatchedToMedical tag = EntityManager.GetComponentData<FireDispatchedToMedical>(citizen);
+                Entity tracker = trackersToClean[i];
+                FireMedicalTracker tag = EntityManager.GetComponentData<FireMedicalTracker>(tracker);
+                Entity buildingEntity = tag.m_BuildingEntity;
 
-                if (tag.m_Building != Entity.Null
-                    && EntityManager.Exists(tag.m_Building)
-                    && !EntityManager.HasComponent<Deleted>(tag.m_Building))
+                if (buildingEntity != Entity.Null
+                    && EntityManager.Exists(buildingEntity)
+                    && !EntityManager.HasComponent<Deleted>(buildingEntity))
                 {
-                    // Only remove RescueTarget if no other active tag references this building
-                    bool otherRefsExist = buildingRefCounts.TryGetValue(tag.m_Building, out int remaining) && remaining > 0;
-
-                    if (!otherRefsExist && EntityManager.HasComponent<RescueTarget>(tag.m_Building))
+                    bool otherRefsExist = buildingRefCounts.TryGetValue(buildingEntity, out int remaining) && remaining > 0;
+                    // Use ECB to defer RescueTarget removal — structural change on rendered building
+                    if (!otherRefsExist && EntityManager.HasComponent<RescueTarget>(buildingEntity))
                     {
-                        EntityManager.RemoveComponent<RescueTarget>(tag.m_Building);
+                        ecb.RemoveComponent<RescueTarget>(buildingEntity);
                     }
                 }
 
-                EntityManager.RemoveComponent<FireDispatchedToMedical>(citizen);
+                EntityManager.DestroyEntity(tracker);
                 cleaned++;
             }
 
-            citizensToClean.Dispose();
+            trackersToClean.Dispose();
             buildingRefCounts.Dispose();
-            taggedEntities.Dispose();
+            trackerEntities.Dispose();
 
             // === DISPATCH (only if toggle is on) ===
 
@@ -134,30 +142,41 @@ namespace MoreDispatchMod.Systems
 
             if (Mod.Settings.DispatchFireToMedicalCalls)
             {
-                var untaggedEntities = m_UntaggedQuery.ToEntityArray(Allocator.Temp);
-                for (int i = 0; i < untaggedEntities.Length; i++)
+                // Track buildings we've already scheduled AddComponent<RescueTarget> for this frame
+                // to avoid duplicate ECB commands for the same building.
+                var buildingsScheduled = new NativeHashSet<Entity>(16, Allocator.Temp);
+
+                var citizenEntities = m_CitizenQuery.ToEntityArray(Allocator.Temp);
+                for (int i = 0; i < citizenEntities.Length; i++)
                 {
-                    Entity citizen = untaggedEntities[i];
+                    Entity citizen = citizenEntities[i];
                     HealthProblem problem = EntityManager.GetComponentData<HealthProblem>(citizen);
 
-                    // Only dispatch to calls that require transport (ambulance)
                     if ((problem.m_Flags & HealthProblemFlags.RequireTransport) == 0)
                     {
                         skippedNoTransport++;
                         continue;
                     }
 
-                    // Get the building the citizen is in
+                    if (trackedCitizens.Contains(citizen))
+                    {
+                        alreadyTagged++;
+                        continue;
+                    }
+
                     CurrentBuilding currentBuilding = EntityManager.GetComponentData<CurrentBuilding>(citizen);
                     Entity buildingEntity = currentBuilding.m_CurrentBuilding;
 
                     if (buildingEntity == Entity.Null || !EntityManager.Exists(buildingEntity))
                         continue;
 
-                    // Add RescueTarget to the BUILDING (not the citizen)
-                    if (!EntityManager.HasComponent<RescueTarget>(buildingEntity))
+                    // Add RescueTarget to the building via ECB (deferred, safe for rendered entities).
+                    // Guard against duplicate ECB commands for the same building this frame.
+                    if (!EntityManager.HasComponent<RescueTarget>(buildingEntity)
+                        && !buildingsScheduled.Contains(buildingEntity))
                     {
-                        EntityManager.AddComponentData(buildingEntity, new RescueTarget(Entity.Null));
+                        ecb.AddComponent(buildingEntity, new RescueTarget(Entity.Null));
+                        buildingsScheduled.Add(buildingEntity);
                     }
 
                     // Create fire rescue request targeting the building
@@ -167,17 +186,22 @@ namespace MoreDispatchMod.Systems
                         buildingEntity, 1f, FireRescueRequestType.Disaster));
                     EntityManager.AddComponentData(request, new RequestGroup(4u));
 
-                    // Tag citizen with building reference for cleanup
-                    EntityManager.AddComponentData(citizen, new FireDispatchedToMedical
+                    // Create tracker entity (non-rendered) instead of tagging the citizen
+                    Entity trackerEntity = EntityManager.CreateEntity();
+                    EntityManager.AddComponentData(trackerEntity, new FireMedicalTracker
                     {
-                        m_Building = buildingEntity
+                        m_CitizenEntity = citizen,
+                        m_BuildingEntity = buildingEntity,
+                        m_CreationFrame = m_SimulationSystem.frameIndex
                     });
+                    trackedCitizens.Add(citizen);
                     dispatched++;
                 }
-                untaggedEntities.Dispose();
-
-                alreadyTagged = m_TaggedQuery.CalculateEntityCount();
+                citizenEntities.Dispose();
+                buildingsScheduled.Dispose();
             }
+
+            trackedCitizens.Dispose();
 
             if (shouldLog)
             {

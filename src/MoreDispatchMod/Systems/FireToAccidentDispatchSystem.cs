@@ -14,37 +14,30 @@ namespace MoreDispatchMod.Systems
 {
     public partial class FireToAccidentDispatchSystem : GameSystemBase
     {
-        // Untagged accident sites — candidates for new dispatch
-        private EntityQuery m_UntaggedQuery;
+        // All accident sites — candidates for dispatch
+        private EntityQuery m_AccidentQuery;
 
-        // Tagged accident sites — candidates for cleanup
-        private EntityQuery m_TaggedQuery;
+        // Tracker entities — for dedup and cleanup
+        private EntityQuery m_TrackerQuery;
 
-        // Orphaned tags — entity lost AccidentSite but still has our tag
-        private EntityQuery m_OrphanedQuery;
-
+        private EndFrameBarrier m_EndFrameBarrier;
+        private SimulationSystem m_SimulationSystem;
         private int m_LogCounter;
 
         protected override void OnCreate()
         {
             base.OnCreate();
 
-            m_UntaggedQuery = GetEntityQuery(
-                ComponentType.ReadWrite<AccidentSite>(),
-                ComponentType.Exclude<FireDispatchedToAccident>(),
-                ComponentType.Exclude<Deleted>(),
-                ComponentType.Exclude<Temp>());
+            m_EndFrameBarrier = World.GetOrCreateSystemManaged<EndFrameBarrier>();
+            m_SimulationSystem = World.GetOrCreateSystemManaged<SimulationSystem>();
 
-            m_TaggedQuery = GetEntityQuery(
+            m_AccidentQuery = GetEntityQuery(
                 ComponentType.ReadOnly<AccidentSite>(),
-                ComponentType.ReadOnly<FireDispatchedToAccident>(),
                 ComponentType.Exclude<Deleted>(),
                 ComponentType.Exclude<Temp>());
 
-            m_OrphanedQuery = GetEntityQuery(
-                ComponentType.ReadOnly<FireDispatchedToAccident>(),
-                ComponentType.Exclude<AccidentSite>(),
-                ComponentType.Exclude<Deleted>());
+            m_TrackerQuery = GetEntityQuery(
+                ComponentType.ReadOnly<FireAccidentTracker>());
         }
 
         protected override void OnUpdate()
@@ -57,46 +50,56 @@ namespace MoreDispatchMod.Systems
                 shouldLog = true;
             }
 
+            var ecb = m_EndFrameBarrier.CreateCommandBuffer();
+
             int cleaned = 0;
-            int orphansCleaned = 0;
 
             // === CLEANUP (always runs, even if toggle is off) ===
 
-            // Clean up tagged accident sites that are secured or no longer traffic accidents
-            var taggedEntities = m_TaggedQuery.ToEntityArray(Allocator.Temp);
-            for (int i = 0; i < taggedEntities.Length; i++)
+            var trackerEntities = m_TrackerQuery.ToEntityArray(Allocator.Temp);
+            var trackedAccidents = new NativeHashSet<Entity>(trackerEntities.Length, Allocator.Temp);
+
+            for (int i = 0; i < trackerEntities.Length; i++)
             {
-                Entity entity = taggedEntities[i];
-                AccidentSite site = EntityManager.GetComponentData<AccidentSite>(entity);
+                Entity tracker = trackerEntities[i];
+                FireAccidentTracker tag = EntityManager.GetComponentData<FireAccidentTracker>(tracker);
+                Entity accidentEntity = tag.m_AccidentEntity;
 
-                bool secured = (site.m_Flags & AccidentSiteFlags.Secured) != 0;
-                bool notTraffic = (site.m_Flags & AccidentSiteFlags.TrafficAccident) == 0;
+                bool accidentGone = accidentEntity == Entity.Null || !EntityManager.Exists(accidentEntity);
+                bool shouldClean = accidentGone;
 
-                if (secured || notTraffic)
+                if (!accidentGone)
                 {
-                    if (EntityManager.HasComponent<RescueTarget>(entity))
+                    if (!EntityManager.HasComponent<AccidentSite>(accidentEntity))
                     {
-                        EntityManager.RemoveComponent<RescueTarget>(entity);
+                        shouldClean = true;
                     }
-                    EntityManager.RemoveComponent<FireDispatchedToAccident>(entity);
+                    else
+                    {
+                        AccidentSite site = EntityManager.GetComponentData<AccidentSite>(accidentEntity);
+                        bool secured = (site.m_Flags & AccidentSiteFlags.Secured) != 0;
+                        bool notTraffic = (site.m_Flags & AccidentSiteFlags.TrafficAccident) == 0;
+                        if (secured || notTraffic)
+                            shouldClean = true;
+                    }
+                }
+
+                if (shouldClean)
+                {
+                    // Use ECB to defer RescueTarget removal — structural change on rendered entity
+                    if (!accidentGone && EntityManager.HasComponent<RescueTarget>(accidentEntity))
+                    {
+                        ecb.RemoveComponent<RescueTarget>(accidentEntity);
+                    }
+                    EntityManager.DestroyEntity(tracker);
                     cleaned++;
                 }
-            }
-            taggedEntities.Dispose();
-
-            // Clean up orphaned tags (entity lost AccidentSite component)
-            var orphanedEntities = m_OrphanedQuery.ToEntityArray(Allocator.Temp);
-            for (int i = 0; i < orphanedEntities.Length; i++)
-            {
-                Entity entity = orphanedEntities[i];
-                if (EntityManager.HasComponent<RescueTarget>(entity))
+                else
                 {
-                    EntityManager.RemoveComponent<RescueTarget>(entity);
+                    trackedAccidents.Add(accidentEntity);
                 }
-                EntityManager.RemoveComponent<FireDispatchedToAccident>(entity);
-                orphansCleaned++;
             }
-            orphanedEntities.Dispose();
+            trackerEntities.Dispose();
 
             // === DISPATCH (only if toggle is on) ===
 
@@ -105,10 +108,10 @@ namespace MoreDispatchMod.Systems
 
             if (Mod.Settings.DispatchFireToAccidents)
             {
-                var untaggedEntities = m_UntaggedQuery.ToEntityArray(Allocator.Temp);
-                for (int i = 0; i < untaggedEntities.Length; i++)
+                var accidentEntities = m_AccidentQuery.ToEntityArray(Allocator.Temp);
+                for (int i = 0; i < accidentEntities.Length; i++)
                 {
-                    Entity entity = untaggedEntities[i];
+                    Entity entity = accidentEntities[i];
                     AccidentSite site = EntityManager.GetComponentData<AccidentSite>(entity);
 
                     if ((site.m_Flags & AccidentSiteFlags.TrafficAccident) == 0)
@@ -117,10 +120,17 @@ namespace MoreDispatchMod.Systems
                     if ((site.m_Flags & AccidentSiteFlags.Secured) != 0)
                         continue;
 
-                    // Add RescueTarget so FireRescueDispatchSystem accepts this entity
+                    if (trackedAccidents.Contains(entity))
+                    {
+                        alreadyTagged++;
+                        continue;
+                    }
+
+                    // Add RescueTarget so FireRescueDispatchSystem accepts this entity.
+                    // Use ECB to defer the structural change to after BatchUploadSystem GPU jobs complete.
                     if (!EntityManager.HasComponent<RescueTarget>(entity))
                     {
-                        EntityManager.AddComponentData(entity, new RescueTarget(Entity.Null));
+                        ecb.AddComponent(entity, new RescueTarget(Entity.Null));
                     }
 
                     // Create fire rescue request
@@ -130,18 +140,24 @@ namespace MoreDispatchMod.Systems
                         entity, 1f, FireRescueRequestType.Disaster));
                     EntityManager.AddComponentData(request, new RequestGroup(4u));
 
-                    // Tag to prevent duplicate dispatch
-                    EntityManager.AddComponent<FireDispatchedToAccident>(entity);
+                    // Create tracker entity (non-rendered) instead of tagging the accident entity
+                    Entity trackerEntity = EntityManager.CreateEntity();
+                    EntityManager.AddComponentData(trackerEntity, new FireAccidentTracker
+                    {
+                        m_AccidentEntity = entity,
+                        m_CreationFrame = m_SimulationSystem.frameIndex
+                    });
+                    trackedAccidents.Add(entity);
                     dispatched++;
                 }
-                untaggedEntities.Dispose();
-
-                alreadyTagged = m_TaggedQuery.CalculateEntityCount();
+                accidentEntities.Dispose();
             }
+
+            trackedAccidents.Dispose();
 
             if (shouldLog)
             {
-                Mod.Log.Info($"[FireAccident] Dispatched={dispatched} Cleaned={cleaned} OrphansCleaned={orphansCleaned} AlreadyTagged={alreadyTagged}");
+                Mod.Log.Info($"[FireAccident] Dispatched={dispatched} Cleaned={cleaned} AlreadyTagged={alreadyTagged}");
             }
         }
     }

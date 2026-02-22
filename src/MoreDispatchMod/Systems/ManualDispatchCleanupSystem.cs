@@ -4,7 +4,6 @@ using Game.Citizens;
 using Game.Common;
 using Game.Events;
 using Game.Objects;
-using Game.Rendering;
 using Game.Simulation;
 using Game.Tools;
 using Game.Vehicles;
@@ -25,6 +24,7 @@ namespace MoreDispatchMod.Systems
         private EntityQuery m_FireTrackerQuery;
         private EntityQuery m_EMSTrackerQuery;
         private EntityQuery m_CrimeTrackerQuery;
+        private EndFrameBarrier m_EndFrameBarrier;
         private SimulationSystem m_SimulationSystem;
         private int m_LogCounter;
 
@@ -32,6 +32,7 @@ namespace MoreDispatchMod.Systems
         {
             base.OnCreate();
 
+            m_EndFrameBarrier = World.GetOrCreateSystemManaged<EndFrameBarrier>();
             m_SimulationSystem = World.GetOrCreateSystemManaged<SimulationSystem>();
 
             // Tracker entity queries — these match our non-rendered tracker entities
@@ -68,6 +69,7 @@ namespace MoreDispatchMod.Systems
             }
 
             uint currentFrame = m_SimulationSystem.frameIndex;
+            var ecb = m_EndFrameBarrier.CreateCommandBuffer();
             int policeCleaned = 0;
             int fireApplied = 0;
             int fireCleaned = 0;
@@ -76,10 +78,10 @@ namespace MoreDispatchMod.Systems
 
             // =====================================================================
             // APPLY PHASE — add deferred structural changes to rendered entities.
-            // These were NOT done in the tool system to avoid crashing
-            // BatchUploadSystem (rendering jobs hold references to entity chunks
-            // during the tool update phase). GameSimulation phase is a safe sync
-            // point where rendering is not active.
+            // Direct EntityManager structural changes (Add/Remove component) crash
+            // BatchUploadSystem because GPU upload jobs hold chunk references that
+            // become invalid when an entity moves archetypes. We use EndFrameBarrier
+            // ECB to defer these to after all frame jobs complete.
             // =====================================================================
 
             // Police: no apply phase needed — Emergency car flags are set via
@@ -100,7 +102,8 @@ namespace MoreDispatchMod.Systems
                 if (targetEntity != Entity.Null && EntityManager.Exists(targetEntity)
                     && !EntityManager.HasComponent<RescueTarget>(targetEntity))
                 {
-                    EntityManager.AddComponentData(targetEntity, new RescueTarget(Entity.Null));
+                    // Use ECB to defer RescueTarget add — structural change on rendered building
+                    ecb.AddComponent(targetEntity, new RescueTarget(Entity.Null));
                     fireApplied++;
                 }
             }
@@ -187,13 +190,19 @@ namespace MoreDispatchMod.Systems
 
                 bool timedOut = (currentFrame - tag.m_CreationFrame) > TIMEOUT_FRAMES;
                 bool targetGone = targetEntity == Entity.Null || !EntityManager.Exists(targetEntity);
-                bool alreadyResolved = !targetGone && !EntityManager.HasComponent<RescueTarget>(targetEntity);
+                // Grace period: RescueTarget is added via ECB (plays back at end of frame),
+                // so HasComponent returns false for 1-2 frames after creation. Avoid false
+                // "already resolved" detection until ECB has had time to play back.
+                bool alreadyResolved = !targetGone
+                    && !EntityManager.HasComponent<RescueTarget>(targetEntity)
+                    && (currentFrame - tag.m_CreationFrame) > 1;
 
                 if (timedOut || targetGone || alreadyResolved)
                 {
                     if (!targetGone && !alreadyResolved && EntityManager.HasComponent<RescueTarget>(targetEntity))
                     {
-                        EntityManager.RemoveComponent<RescueTarget>(targetEntity);
+                        // Use ECB to defer RescueTarget removal — structural change on rendered building
+                        ecb.RemoveComponent<RescueTarget>(targetEntity);
                     }
 
                     EntityManager.DestroyEntity(tracker);
@@ -265,7 +274,8 @@ namespace MoreDispatchMod.Systems
 
                     if (!targetGone && !resolved && EntityManager.HasComponent<AccidentSite>(targetEntity))
                     {
-                        EntityManager.RemoveComponent<AccidentSite>(targetEntity);
+                        // Use ECB to defer AccidentSite removal — structural change on rendered building
+                        ecb.RemoveComponent<AccidentSite>(targetEntity);
                     }
 
                     Entity eventEntity = tag.m_EventEntity;

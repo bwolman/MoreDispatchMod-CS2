@@ -3,21 +3,26 @@ using Unity.Entities;
 namespace MoreDispatchMod.Components
 {
     /// <summary>
-    /// Marker component added to AccidentSite entities that already have a
-    /// fire rescue request created by this mod, preventing duplicate requests.
+    /// Tracker for fire-to-accident dispatch. Lives on a separate non-rendered entity
+    /// (NOT on the accident site entity) to avoid archetype changes on rendered entities
+    /// that crash BatchUploadSystem.
     /// </summary>
-    public struct FireDispatchedToAccident : IComponentData
+    public struct FireAccidentTracker : IComponentData
     {
+        public Entity m_AccidentEntity;
+        public uint m_CreationFrame;
     }
 
     /// <summary>
-    /// Marker component added to citizen entities with HealthProblem that already
-    /// have a fire rescue request created by this mod, preventing duplicate requests.
-    /// Tracks which building received RescueTarget for proper cleanup.
+    /// Tracker for fire-to-medical dispatch. Lives on a separate non-rendered entity
+    /// (NOT on the citizen entity) to avoid archetype changes on rendered entities
+    /// that crash BatchUploadSystem.
     /// </summary>
-    public struct FireDispatchedToMedical : IComponentData
+    public struct FireMedicalTracker : IComponentData
     {
-        public Entity m_Building;
+        public Entity m_CitizenEntity;
+        public Entity m_BuildingEntity;
+        public uint m_CreationFrame;
     }
 
     /// <summary>
