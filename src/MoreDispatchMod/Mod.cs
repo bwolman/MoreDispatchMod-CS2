@@ -38,6 +38,7 @@ namespace MoreDispatchMod
 
                 updateSystem.UpdateAt<FireToAccidentDispatchSystem>(SystemUpdatePhase.GameSimulation);
                 updateSystem.UpdateAt<FireToMedicalDispatchSystem>(SystemUpdatePhase.GameSimulation);
+                updateSystem.UpdateAt<PreventHelicopterBuildingFireSystem>(SystemUpdatePhase.GameSimulation);
                 updateSystem.UpdateAt<ManualDispatchCleanupSystem>(SystemUpdatePhase.GameSimulation);
                 updateSystem.UpdateAt<ManualDispatchToolSystem>(SystemUpdatePhase.ToolUpdate);
                 updateSystem.UpdateAt<ManualDispatchUISystem>(SystemUpdatePhase.UIUpdate);
@@ -65,6 +66,9 @@ namespace MoreDispatchMod
 
                 { $"Options.OPTION[{id}.{name}.DispatchFireToMedicalCalls]", "Fire Engines to Medical Calls" },
                 { $"Options.OPTION_DESCRIPTION[{id}.{name}.DispatchFireToMedicalCalls]", "Additionally dispatch fire engines to all medical calls requiring transport." },
+
+                { $"Options.OPTION[{id}.{name}.PreventHelicopterBuildingFires]", "Prevent Helicopters at Building Fires" },
+                { $"Options.OPTION_DESCRIPTION[{id}.{name}.PreventHelicopterBuildingFires]", "Fire helicopters will only respond to forest fires, not building fires." },
 
                 { $"Options.OPTION[{id}.{name}.ResetSettings]", "Reset to Defaults" },
                 { $"Options.WARNING[{id}.{name}.ResetSettings]", "Are you sure you want to reset all More Dispatch Mod settings to their default values?" },
