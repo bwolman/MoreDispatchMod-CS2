@@ -23,6 +23,9 @@ namespace MoreDispatchMod.Settings
         public bool PreventHelicopterBuildingFires { get; set; }
 
         [SettingsUISection("General", "Dispatch")]
+        public bool AllowMultiplePolicePerBuilding { get; set; }
+
+        [SettingsUISection("General", "Dispatch")]
         [SettingsUIButton]
         [SettingsUIConfirmation]
         public bool ResetSettings
@@ -39,6 +42,7 @@ namespace MoreDispatchMod.Settings
             DispatchFireToAccidents = false;
             DispatchFireToMedicalCalls = false;
             PreventHelicopterBuildingFires = false;
+            AllowMultiplePolicePerBuilding = false;
         }
     }
 }
