@@ -142,9 +142,10 @@ namespace MoreDispatchMod.Systems
                     Mod.Log.Info($"[ManualCleanup] Police cleanup: tracker={tracker.Index} target={targetEntity.Index} " +
                         $"reason={reason} age={currentFrame - tag.m_CreationFrame}");
 
-                    if (!targetGone && !resolved && EntityManager.HasComponent<AccidentSite>(targetEntity))
-                        ecb.RemoveComponent<AccidentSite>(targetEntity);
-
+                    // Destroying the event entity signals vanilla AccidentSiteSystem to remove
+                    // AccidentSite from the building safely on its next run (within 64 frames).
+                    // Do NOT call ecb.RemoveComponent<AccidentSite> — simultaneous structural
+                    // changes on many rendered buildings corrupt BatchUploadSystem GPU batches.
                     Entity eventEntity = tag.m_EventEntity;
                     if (eventEntity != Entity.Null && EntityManager.Exists(eventEntity))
                         EntityManager.DestroyEntity(eventEntity);
@@ -246,12 +247,10 @@ namespace MoreDispatchMod.Systems
                     Mod.Log.Info($"[ManualCleanup] Crime cleanup: tracker={tracker.Index} target={targetEntity.Index} " +
                         $"reason={reason} age={currentFrame - tag.m_CreationFrame}");
 
-                    if (!targetGone && !resolved && EntityManager.HasComponent<AccidentSite>(targetEntity))
-                    {
-                        // Use ECB to defer AccidentSite removal — structural change on rendered building
-                        ecb.RemoveComponent<AccidentSite>(targetEntity);
-                    }
-
+                    // Destroying the event entity signals vanilla AccidentSiteSystem to remove
+                    // AccidentSite from the building safely on its next run (within 64 frames).
+                    // Do NOT call ecb.RemoveComponent<AccidentSite> — simultaneous structural
+                    // changes on many rendered buildings corrupt BatchUploadSystem GPU batches.
                     Entity eventEntity = tag.m_EventEntity;
                     if (eventEntity != Entity.Null && EntityManager.Exists(eventEntity))
                     {
