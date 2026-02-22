@@ -64,6 +64,12 @@
     </Reference>
   </ItemGroup>
 
+  <!-- Validate that every *System.cs file has an UpdateAt<> registration in Mod.cs -->
+  <Target Name="ValidateSystemRegistrations" BeforeTargets="BeforeBuild">
+    <Exec Command="python3 &quot;$(MSBuildProjectDirectory)/validate_systems.py&quot;"
+          WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
   <!-- Auto-deploy to game Mods folder after build -->
   <Target Name="DeployMod" AfterTargets="Build">
     <MakeDir Directories="$(ModsPath)" />

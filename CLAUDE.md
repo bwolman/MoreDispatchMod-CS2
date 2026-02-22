@@ -9,20 +9,32 @@ dotnet build src/MoreDispatchMod/MoreDispatchMod.csproj
 ```
 Requires `Directory.Build.props` with `GamePath` pointing to your CS2 install (copy from `Directory.Build.props.example`).
 
+The build auto-deploys the DLL to the game Mods folder (defined in `ModsPath` in the .csproj). No manual copy needed.
+
+A pre-build script (`validate_systems.py`) cross-checks three things against `systems.lock` (the canonical system list):
+1. Every system in `systems.lock` has a corresponding `*System.cs` file on disk
+2. Every system in `systems.lock` has `UpdateAt<ClassName>` in `Mod.cs`
+3. Every `*System.cs` file on disk is listed in `systems.lock`
+
+**When adding a new system**: create the `.cs` file, add `UpdateAt<>` to `Mod.cs`, and add the name to `systems.lock`.
+**When removing a system**: delete the `.cs` file, remove `UpdateAt<>` from `Mod.cs`, and remove the name from `systems.lock`.
+The build will fail with a clear error if anything is out of sync.
+
 UI build (required for toolbar button and panel):
 ```
 cd src/MoreDispatchMod/UI && npm install && npm run build
 ```
 
 ## Architecture
-- **Mod.cs**: `IMod` entry point — registers settings, localization, and 5 ECS systems
-- **Settings/MoreDispatchModSettings.cs**: 2 boolean toggles + reset button in Options UI
+- **Mod.cs**: `IMod` entry point — registers settings, localization, and 6 ECS systems
+- **Settings/MoreDispatchModSettings.cs**: 3 boolean toggles + reset button in Options UI
 - **Systems/FireToAccidentDispatchSystem.cs**: Sends fire engines to traffic accidents with cleanup
 - **Systems/FireToMedicalDispatchSystem.cs**: Sends fire engines to medical calls, targeting buildings
-- **Systems/ManualDispatchToolSystem.cs**: Custom `ToolBaseSystem` — raycast, highlight, per-click dispatch of Police/Fire/EMS
+- **Systems/PreventHelicopterBuildingFireSystem.cs**: Cancels helicopter dispatches to building fires (forest-fire only)
+- **Systems/ManualDispatchToolSystem.cs**: Custom `ToolBaseSystem` — raycast, highlight, per-click dispatch of Police/Fire/EMS/Crime
 - **Systems/ManualDispatchUISystem.cs**: `UISystemBase` — ValueBinding/TriggerBinding bridge between React UI and game systems
 - **Systems/ManualDispatchCleanupSystem.cs**: Removes temporary `AccidentSite`/`RescueTarget` after timeout
-- **Components/TagComponents.cs**: `FireDispatchedToAccident`, `FireDispatchedToMedical`, `ManualPoliceDispatched`, `ManualFireDispatched`, and `ManualEMSDispatched` markers to prevent duplicate requests
+- **Components/TagComponents.cs**: Non-rendered tracker entities (`FireAccidentTracker`, `FireMedicalTracker`, `ManualPoliceDispatched`, `ManualFireDispatched`, `ManualEMSDispatched`, `ManualCrimeDispatched`) prevent duplicate dispatch requests
 
 ## UI
 - **UI/src/index.tsx**: ModRegistrar — appends toolbar button to GameTopLeft and panel to Game
