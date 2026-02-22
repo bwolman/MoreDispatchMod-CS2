@@ -65,4 +65,12 @@ namespace MoreDispatchMod.Components
         public Entity m_TargetEntity;
         public Entity m_EventEntity;
     }
+
+    /// <summary>
+    /// Marker added to a FireRescueRequest entity after we have issued a HandleRequest cancel for it.
+    /// Prevents PreventHelicopterBuildingFireSystem from issuing a second cancel on the next frame
+    /// before HandleRequestSystem has had a chance to destroy the request entity.
+    /// Lives on the (non-rendered) request entity — structural changes on non-rendered entities are safe.
+    /// </summary>
+    public struct HelicopterCancelled : IComponentData { }
 }
