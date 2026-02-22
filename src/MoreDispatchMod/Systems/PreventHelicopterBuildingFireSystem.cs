@@ -45,35 +45,63 @@ namespace MoreDispatchMod.Systems
                 shouldLog = true;
             }
 
-            int cancelled = 0;
+            var allRequests = m_DispatchedFireRequestQuery.ToEntityArray(Allocator.Temp);
 
-            var requestEntities = m_DispatchedFireRequestQuery.ToEntityArray(Allocator.Temp);
-            for (int i = 0; i < requestEntities.Length; i++)
+            // Pass 1: collect fire targets that have a ground engine (FireEngine, not Aircraft)
+            // already dispatched. A ground engine dispatch means the vanilla pathfinder found
+            // a road-accessible route — the fire can be fought from the road network.
+            var engineTargets = new NativeHashSet<Entity>(allRequests.Length, Allocator.Temp);
+            for (int i = 0; i < allRequests.Length; i++)
             {
-                Entity requestEntity = requestEntities[i];
+                Dispatched dispatched = EntityManager.GetComponentData<Dispatched>(allRequests[i]);
+                Entity vehicle = dispatched.m_Handler;
+
+                if (vehicle == Entity.Null || !EntityManager.Exists(vehicle))
+                    continue;
+                if (!EntityManager.HasComponent<FireEngine>(vehicle))
+                    continue;
+                if (EntityManager.HasComponent<Aircraft>(vehicle))
+                    continue; // this is a helicopter — skip
+
+                FireRescueRequest req = EntityManager.GetComponentData<FireRescueRequest>(allRequests[i]);
+                if (req.m_Target != Entity.Null && EntityManager.Exists(req.m_Target))
+                    engineTargets.Add(req.m_Target);
+            }
+
+            // Pass 2: cancel helicopter dispatches that are unnecessary.
+            // Cancel if:
+            //   (a) target is a building — ground engines handle building fires
+            //   (b) target is a forest fire AND a ground engine is already dispatched to it
+            //       — the fire is road-accessible, no helicopter needed
+            // Allow if:
+            //   target is a forest fire AND no ground engine is dispatched to it
+            //       — remote/inaccessible fire, helicopter is the right tool
+            int cancelled = 0;
+            for (int i = 0; i < allRequests.Length; i++)
+            {
+                Entity requestEntity = allRequests[i];
 
                 Dispatched dispatched = EntityManager.GetComponentData<Dispatched>(requestEntity);
                 Entity vehicleEntity = dispatched.m_Handler;
 
                 if (vehicleEntity == Entity.Null || !EntityManager.Exists(vehicleEntity))
                     continue;
-
-                // Check if handler is a fire helicopter (has both FireEngine and Aircraft)
                 if (!EntityManager.HasComponent<FireEngine>(vehicleEntity) || !EntityManager.HasComponent<Aircraft>(vehicleEntity))
-                    continue;
+                    continue; // not a helicopter
 
-                // Get the fire target
                 FireRescueRequest request = EntityManager.GetComponentData<FireRescueRequest>(requestEntity);
                 Entity targetEntity = request.m_Target;
 
                 if (targetEntity == Entity.Null || !EntityManager.Exists(targetEntity))
                     continue;
 
-                // Allow helicopters for non-building fires (forest/wildfire)
-                if (!EntityManager.HasComponent<Building>(targetEntity))
-                    continue;
+                bool isBuilding = EntityManager.HasComponent<Building>(targetEntity);
+                bool engineAlsoDispatched = engineTargets.Contains(targetEntity);
 
-                // Cancel helicopter dispatch to building fire
+                if (!isBuilding && !engineAlsoDispatched)
+                    continue; // remote forest fire — let helicopter respond
+
+                // Cancel: building fire or road-accessible forest fire
                 Entity handleEntity = EntityManager.CreateEntity();
                 EntityManager.AddComponentData(handleEntity, new HandleRequest(
                     requestEntity, Entity.Null, true));
@@ -82,10 +110,13 @@ namespace MoreDispatchMod.Systems
 
                 if (shouldLog || cancelled <= 3)
                 {
-                    Mod.Log.Info($"[HeliBlock] Cancelled helicopter {vehicleEntity.Index} dispatch to building fire {targetEntity.Index}, request={requestEntity.Index}");
+                    string reason = isBuilding ? "building" : "engine-accessible forest fire";
+                    Mod.Log.Info($"[HeliBlock] Cancelled helicopter {vehicleEntity.Index} → {targetEntity.Index} ({reason}), request={requestEntity.Index}");
                 }
             }
-            requestEntities.Dispose();
+
+            allRequests.Dispose();
+            engineTargets.Dispose();
 
             if (shouldLog && cancelled > 0)
             {
