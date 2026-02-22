@@ -7,6 +7,7 @@ using Game.Input;
 using Game.Objects;
 using Game.Pathfind;
 using Game.Prefabs;
+using Game.Rendering;
 using Game.Simulation;
 using Game.Tools;
 using Game.Vehicles;
@@ -17,6 +18,7 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
+using UnityEngine;
 
 namespace MoreDispatchMod.Systems
 {
@@ -28,11 +30,13 @@ namespace MoreDispatchMod.Systems
         public bool FireEnabled { get; set; }
         public bool EMSEnabled { get; set; }
         public bool CrimeEnabled { get; set; }
+        public bool AreaCrimeEnabled { get; set; }
 
         private const uint REQUEST_GROUP_EMERGENCY = 4u;
 
         private ToolOutputBarrier m_Barrier;
         private SimulationSystem m_SimulationSystem;
+        private OverlayRenderSystem m_OverlayRenderSystem;
         private EntityQuery m_HighlightedQuery;
         private EntityQuery m_CitizenQuery;
         private EntityQuery m_PoliceCarQuery;
@@ -41,6 +45,7 @@ namespace MoreDispatchMod.Systems
         private EntityQuery m_EMSDispatchedQuery;
         private EntityQuery m_CrimeDispatchedQuery;
         private EntityQuery m_CrimePrefabQuery;
+        private EntityQuery m_BuildingQuery;
         private Entity m_PreviousRaycastEntity;
 
         public override PrefabBase GetPrefab()
@@ -60,6 +65,7 @@ namespace MoreDispatchMod.Systems
 
             m_Barrier = World.GetOrCreateSystemManaged<ToolOutputBarrier>();
             m_SimulationSystem = World.GetOrCreateSystemManaged<SimulationSystem>();
+            m_OverlayRenderSystem = World.GetOrCreateSystemManaged<OverlayRenderSystem>();
 
             m_HighlightedQuery = GetEntityQuery(
                 ComponentType.ReadOnly<Highlighted>(),
@@ -95,6 +101,12 @@ namespace MoreDispatchMod.Systems
             m_CrimePrefabQuery = GetEntityQuery(
                 ComponentType.ReadOnly<CrimeData>(),
                 ComponentType.ReadOnly<PrefabData>());
+
+            m_BuildingQuery = GetEntityQuery(
+                ComponentType.ReadOnly<Building>(),
+                ComponentType.ReadOnly<Game.Objects.Transform>(),
+                ComponentType.Exclude<Deleted>(),
+                ComponentType.Exclude<Temp>());
 
             Mod.Log.Info("[ManualDispatchTool] OnCreate complete");
         }
@@ -150,6 +162,26 @@ namespace MoreDispatchMod.Systems
                 m_PreviousRaycastEntity = hitEntity;
             }
 
+            // --- Area Crime overlay ---
+            // Draw a radius circle at the raycast hit position when Area Crime mode is on.
+            if (AreaCrimeEnabled && raycastHit)
+            {
+                OverlayRenderSystem.Buffer overlayBuffer = m_OverlayRenderSystem.GetBuffer(out JobHandle overlayDeps);
+                overlayDeps.Complete();
+
+                float radius = Mod.Settings.AreaCrimeRadius;
+                overlayBuffer.DrawCircle(
+                    new UnityEngine.Color(1.0f, 0.3f, 0.0f, 0.9f),      // outline: bright orange
+                    new UnityEngine.Color(0.85f, 0.15f, 0.15f, 0.25f),  // fill: semi-transparent red
+                    0f,                                                    // dash length (0 = solid)
+                    0,                                                     // styleFlags
+                    new float2(0f, 1f),                                    // surface normal (Y-up terrain)
+                    hit.m_HitPosition,
+                    radius * 2f);                                          // DrawCircle takes diameter
+
+                m_OverlayRenderSystem.AddBufferWriter(Dependency);
+            }
+
             // --- Dispatch on click ---
             // IMPORTANT: NO structural changes on rendered entities (buildings/vehicles) here.
             // All AddComponent calls on rendered entities are deferred to
@@ -181,6 +213,11 @@ namespace MoreDispatchMod.Systems
                 if (CrimeEnabled && isBuilding)
                 {
                     CreateCrimeDispatch(hitEntity);
+                }
+
+                if (AreaCrimeEnabled)
+                {
+                    CreateAreaCrimeDispatch(hit.m_HitPosition);
                 }
             }
 
@@ -569,6 +606,39 @@ namespace MoreDispatchMod.Systems
             });
 
             Mod.Log.Info($"[ManualDispatch] Crime tracker created for building {buildingEntity.Index} (tracker={tracker.Index})");
+        }
+
+        private void CreateAreaCrimeDispatch(float3 center)
+        {
+            float radius = Mod.Settings.AreaCrimeRadius;
+            float radiusSq = radius * radius;
+
+            var buildings = m_BuildingQuery.ToEntityArray(Allocator.Temp);
+            int dispatched = 0;
+            int skipped = 0;
+
+            for (int i = 0; i < buildings.Length; i++)
+            {
+                Entity building = buildings[i];
+                float3 pos = EntityManager.GetComponentData<Game.Objects.Transform>(building).m_Position;
+
+                // Use 2D (XZ) distance to ignore elevation differences on hilly terrain
+                float distSq = math.distancesq(
+                    new float2(pos.x, pos.z),
+                    new float2(center.x, center.z));
+
+                if (distSq > radiusSq)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                CreateCrimeDispatch(building);
+                dispatched++;
+            }
+
+            buildings.Dispose();
+            Mod.Log.Info($"[ManualDispatch] AreaCrime: center=({center.x:F0},{center.z:F0}) radius={radius}m dispatched={dispatched} skipped={skipped}");
         }
     }
 }
