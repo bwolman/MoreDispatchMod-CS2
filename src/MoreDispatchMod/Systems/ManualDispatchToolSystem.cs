@@ -5,7 +5,6 @@ using Game.Common;
 using Game.Events;
 using Game.Input;
 using Game.Objects;
-using Game.Pathfind;
 using Game.Prefabs;
 using Game.Rendering;
 using Game.Simulation;
@@ -39,7 +38,6 @@ namespace MoreDispatchMod.Systems
         private OverlayRenderSystem m_OverlayRenderSystem;
         private EntityQuery m_HighlightedQuery;
         private EntityQuery m_CitizenQuery;
-        private EntityQuery m_PoliceCarQuery;
         private EntityQuery m_PoliceDispatchedQuery;
         private EntityQuery m_FireDispatchedQuery;
         private EntityQuery m_EMSDispatchedQuery;
@@ -75,13 +73,6 @@ namespace MoreDispatchMod.Systems
             m_CitizenQuery = GetEntityQuery(
                 ComponentType.ReadOnly<Citizen>(),
                 ComponentType.ReadOnly<CurrentBuilding>(),
-                ComponentType.Exclude<Deleted>(),
-                ComponentType.Exclude<Temp>());
-
-            m_PoliceCarQuery = GetEntityQuery(
-                ComponentType.ReadOnly<Game.Vehicles.PoliceCar>(),
-                ComponentType.ReadOnly<Game.Objects.Transform>(),
-                ComponentType.ReadOnly<ServiceDispatch>(),
                 ComponentType.Exclude<Deleted>(),
                 ComponentType.Exclude<Temp>());
 
@@ -228,175 +219,67 @@ namespace MoreDispatchMod.Systems
         {
             uint currentFrame = m_SimulationSystem.frameIndex;
 
-            // Collect already-dispatched trackers to (a) prevent dispatching the same car twice
-            // and (b) optionally prevent sending more than one car per building.
-            var policeTrackers = m_PoliceDispatchedQuery.ToEntityArray(Allocator.Temp);
-            int dispatchedCount = policeTrackers.Length;
-            Entity[] dispatchedCars = new Entity[dispatchedCount];
-            for (int d = 0; d < dispatchedCount; d++)
-            {
-                ManualPoliceDispatched existingTag = EntityManager.GetComponentData<ManualPoliceDispatched>(policeTrackers[d]);
-                dispatchedCars[d] = existingTag.m_PoliceCarEntity;
-            }
-
             if (!Mod.Settings.AllowMultiplePolicePerBuilding)
             {
+                var policeTrackers = m_PoliceDispatchedQuery.ToEntityArray(Allocator.Temp);
                 bool alreadyTargeted = false;
                 for (int i = 0; i < policeTrackers.Length; i++)
                 {
                     ManualPoliceDispatched existing = EntityManager.GetComponentData<ManualPoliceDispatched>(policeTrackers[i]);
-                    if (existing.m_TargetEntity == entity)
-                    {
-                        alreadyTargeted = true;
-                        break;
-                    }
+                    if (existing.m_TargetEntity == entity) { alreadyTargeted = true; break; }
                 }
+                policeTrackers.Dispose();
                 if (alreadyTargeted)
                 {
-                    policeTrackers.Dispose();
-                    Mod.Log.Info($"[ManualDispatch] Police already dispatched to {entity.Index}, skipping (AllowMultiple=off)");
+                    Mod.Log.Info($"[ManualDispatch] Police already dispatched to {entity.Index}, skipping");
                     return;
                 }
             }
-            policeTrackers.Dispose();
 
-            Mod.Log.Info($"[ManualDispatch] Police: {dispatchedCount} cars already dispatched by mod");
-
-            // Find the nearest available police car
-            float3 targetPos = EntityManager.GetComponentData<Game.Objects.Transform>(entity).m_Position;
-            var policeCars = m_PoliceCarQuery.ToEntityArray(Allocator.Temp);
-
-            Mod.Log.Info($"[ManualDispatch] Police: searching {policeCars.Length} cars for nearest to entity {entity.Index} at {targetPos}");
-
-            Entity bestCar = Entity.Null;
-            float bestDistSq = float.MaxValue;
-            int skippedFlags = 0;
-            int skippedNoRequest = 0;
-            int skippedAlreadyDispatched = 0;
-
-            for (int i = 0; i < policeCars.Length; i++)
+            if (EntityManager.HasComponent<AccidentSite>(entity))
             {
-                Entity carEntity = policeCars[i];
-
-                // Skip cars already dispatched by our mod
-                bool isDispatched = false;
-                for (int j = 0; j < dispatchedCount; j++)
-                {
-                    if (carEntity == dispatchedCars[j])
-                    {
-                        isDispatched = true;
-                        break;
-                    }
-                }
-                if (isDispatched)
-                {
-                    skippedAlreadyDispatched++;
-                    continue;
-                }
-
-                Game.Vehicles.PoliceCar pc = EntityManager.GetComponentData<Game.Vehicles.PoliceCar>(carEntity);
-
-                // Skip unavailable cars
-                if ((pc.m_State & (PoliceCarFlags.Returning | PoliceCarFlags.AtTarget
-                                 | PoliceCarFlags.ShiftEnded | PoliceCarFlags.Disabled
-                                 | PoliceCarFlags.AccidentTarget)) != 0)
-                {
-                    skippedFlags++;
-                    continue;
-                }
-                if (pc.m_RequestCount < 1)
-                {
-                    skippedNoRequest++;
-                    continue;
-                }
-
-                float3 carPos = EntityManager.GetComponentData<Game.Objects.Transform>(carEntity).m_Position;
-                float distSq = math.distancesq(carPos, targetPos);
-                if (distSq < bestDistSq)
-                {
-                    bestDistSq = distSq;
-                    bestCar = carEntity;
-                }
-            }
-            policeCars.Dispose();
-
-            Mod.Log.Info($"[ManualDispatch] Police: skippedFlags={skippedFlags} skippedNoRequest={skippedNoRequest} skippedAlreadyDispatched={skippedAlreadyDispatched} bestCar={bestCar.Index} dist={math.sqrt(bestDistSq):F0}");
-
-            if (bestCar == Entity.Null)
-            {
-                Mod.Log.Info("[ManualDispatch] No available police cars found");
+                Mod.Log.Info($"[ManualDispatch] Building {entity.Index} already has AccidentSite, skipping police");
                 return;
             }
 
-            // Log pre-modification state
-            Game.Vehicles.PoliceCar preState = EntityManager.GetComponentData<Game.Vehicles.PoliceCar>(bestCar);
-            Car preCarFlags = EntityManager.GetComponentData<Car>(bestCar);
-            Target preTarget = EntityManager.GetComponentData<Target>(bestCar);
-            PathOwner prePathOwner = EntityManager.GetComponentData<PathOwner>(bestCar);
-            DynamicBuffer<ServiceDispatch> preDispatches = EntityManager.GetBuffer<ServiceDispatch>(bestCar);
-            Mod.Log.Info($"[ManualDispatch] Police PRE car={bestCar.Index}: pcState=0x{(uint)preState.m_State:X} " +
-                $"carFlags=0x{(uint)preCarFlags.m_Flags:X} target={preTarget.m_Target.Index} " +
-                $"pathState=0x{(uint)prePathOwner.m_State:X} dispatches={preDispatches.Length} requestCount={preState.m_RequestCount}");
-
-            // Clear existing ServiceDispatch entries so the car's patrol assignments don't
-            // compete. We do NOT add a new request entity here — PoliceCarAISystem.ValidateSite()
-            // requires m_Site to have an AccidentSite component, which our target building lacks,
-            // causing the car to return after ~64 frames. ManualDispatchCleanupSystem maintains
-            // the dispatch via a per-tick heartbeat instead.
-            DynamicBuffer<ServiceDispatch> dispatches = EntityManager.GetBuffer<ServiceDispatch>(bestCar);
-            dispatches.Clear();
-
-            // Set emergency car flags — sirens and lights.
-            // Clear AnyLaneTarget: vanilla SelectNextDispatch() always clears it when activating
-            // emergency dispatch. If left set alongside Emergency, PathSystem may calculate a
-            // patrol-style path (elevated/transit lane positions) causing the floating effect.
-            Car car = EntityManager.GetComponentData<Car>(bestCar);
-            car.m_Flags |= CarFlags.Emergency | CarFlags.StayOnRoad | CarFlags.UsePublicTransportLanes;
-            car.m_Flags &= ~CarFlags.AnyLaneTarget;
-            EntityManager.SetComponentData(bestCar, car);
-
-            // Set navigation target
-            EntityManager.SetComponentData(bestCar, new Target(entity));
-
-            // Trigger new pathfinding to our target
-            PathOwner pathOwner = EntityManager.GetComponentData<PathOwner>(bestCar);
-            pathOwner.m_State |= PathFlags.Updated;
-            EntityManager.SetComponentData(bestCar, pathOwner);
-
-            // Clear EndOfPath to prevent false arrival detection before new path arrives
-            if (EntityManager.HasComponent<CarCurrentLane>(bestCar))
+            var crimePrefabs = m_CrimePrefabQuery.ToEntityArray(Allocator.Temp);
+            if (crimePrefabs.Length == 0)
             {
-                CarCurrentLane currentLane = EntityManager.GetComponentData<CarCurrentLane>(bestCar);
-                currentLane.m_LaneFlags &= ~CarLaneFlags.EndOfPath;
-                EntityManager.SetComponentData(bestCar, currentLane);
+                crimePrefabs.Dispose();
+                Mod.Log.Warn("[ManualDispatch] No crime prefabs found — cannot dispatch police");
+                return;
             }
+            Entity crimePrefab = crimePrefabs[0];
+            crimePrefabs.Dispose();
 
-            // DO NOT add EffectsUpdated to the car — it's a structural change on a
-            // rendered entity that crashes BatchUploadSystem. Emergency car flags
-            // (set via SetComponentData above) are sufficient for sirens/lights.
+            // Persistent event entity (non-rendered — same pattern as Crime dispatch)
+            Entity eventEntity = EntityManager.CreateEntity();
+            EntityManager.AddComponentData<Game.Events.Event>(eventEntity, default);
+            EntityManager.AddComponentData(eventEntity, new PrefabRef(crimePrefab));
+            EntityManager.AddBuffer<TargetElement>(eventEntity);
+            EntityManager.AddComponentData<Created>(eventEntity, default);
+            EntityManager.AddComponentData<Updated>(eventEntity, default);
 
-            // Create a NON-RENDERED tracker entity for our tag.
-            // NEVER add custom components to rendered entities (buildings/vehicles) —
-            // it creates new archetypes that crash BatchUploadSystem.
+            // AddAccidentSite command entity (non-rendered — safe, processed by AddAccidentSiteSystem)
+            Entity addSiteCmd = EntityManager.CreateEntity();
+            EntityManager.AddComponentData<Game.Common.Event>(addSiteCmd, default);
+            EntityManager.AddComponentData(addSiteCmd, new AddAccidentSite
+            {
+                m_Event = eventEntity,
+                m_Target = entity,
+                m_Flags = AccidentSiteFlags.CrimeScene | AccidentSiteFlags.CrimeDetected
+            });
+
+            // Non-rendered tracker
             Entity tracker = EntityManager.CreateEntity();
             EntityManager.AddComponentData(tracker, new ManualPoliceDispatched
             {
                 m_CreationFrame = currentFrame,
                 m_TargetEntity = entity,
-                m_PoliceCarEntity = bestCar,
-                m_RequestEntity = Entity.Null  // no request entity — heartbeat maintains dispatch
+                m_EventEntity = eventEntity
             });
 
-            // Log post-modification state
-            Game.Vehicles.PoliceCar postState = EntityManager.GetComponentData<Game.Vehicles.PoliceCar>(bestCar);
-            Car postCarFlags = EntityManager.GetComponentData<Car>(bestCar);
-            Target postTarget = EntityManager.GetComponentData<Target>(bestCar);
-            PathOwner postPathOwner = EntityManager.GetComponentData<PathOwner>(bestCar);
-            Mod.Log.Info($"[ManualDispatch] Police POST car={bestCar.Index}: pcState=0x{(uint)postState.m_State:X} " +
-                $"carFlags=0x{(uint)postCarFlags.m_Flags:X} target={postTarget.m_Target.Index} " +
-                $"pathState=0x{(uint)postPathOwner.m_State:X} requestCount={postState.m_RequestCount}");
-
-            Mod.Log.Info($"[ManualDispatch] Police car {bestCar.Index} dispatched to {entity.Index} (tracker={tracker.Index})");
+            Mod.Log.Info($"[ManualDispatch] Police dispatch to {entity.Index} (tracker={tracker.Index} event={eventEntity.Index})");
         }
 
         private void CreateFireDispatch(Entity entity)

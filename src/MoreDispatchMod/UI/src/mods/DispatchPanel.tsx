@@ -64,7 +64,7 @@ export const DispatchPanel = () => {
                         onSelect={toggleCrime}
                     >
                         <img src="coui://uil/Standard/Crime.svg" className={styles.optionIcon} alt="Crime" />
-                        <span>Crime</span>
+                        <span>Single Crime</span>
                     </Button>
                     <Button
                         variant="flat"

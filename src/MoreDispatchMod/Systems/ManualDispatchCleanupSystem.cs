@@ -3,17 +3,13 @@ using Game.Buildings;
 using Game.Citizens;
 using Game.Common;
 using Game.Events;
-using Game.Objects;
-using Game.Pathfind;
 using Game.Simulation;
 using Game.Tools;
-using Game.Vehicles;
 
 using MoreDispatchMod.Components;
 
 using Unity.Collections;
 using Unity.Entities;
-using Unity.Mathematics;
 
 namespace MoreDispatchMod.Systems
 {
@@ -85,10 +81,8 @@ namespace MoreDispatchMod.Systems
             // ECB to defer these to after all frame jobs complete.
             // =====================================================================
 
-            // Police: no apply phase needed — Emergency car flags are set via
-            // SetComponentData in CreatePoliceDispatch() (non-structural, safe).
-            // DO NOT add EffectsUpdated here — it's a structural change on a
-            // rendered entity that crashes BatchUploadSystem.
+            // Police: no apply phase needed — AccidentSite is added via AddAccidentSite command
+            // entity in ManualDispatchToolSystem; vanilla AddAccidentSiteSystem handles it safely.
             var policeTrackers = m_PoliceTrackerQuery.ToEntityArray(Allocator.Temp);
             // Don't dispose — reused in cleanup below
 
@@ -119,123 +113,41 @@ namespace MoreDispatchMod.Systems
             // CLEANUP PHASE — remove tracker entities when dispatch is resolved.
             // =====================================================================
 
-            // --- Police cleanup + heartbeat ---
-            // We do NOT use ServiceRequest/PoliceEmergencyRequest for dispatch. PoliceCarAISystem
-            // calls ValidateSite() on the request's m_Site entity, requires AccidentSite, fails,
-            // and returns the car after ~64 frames. Instead we assert Emergency flags, Target, and
-            // empty ServiceDispatch each tick. Cleanup on arrival, timeout, destruction, or shift end.
+            // --- Police cleanup (mirrors Crime cleanup — AccidentSite lifecycle) ---
             for (int i = 0; i < policeTrackers.Length; i++)
             {
                 Entity tracker = policeTrackers[i];
                 ManualPoliceDispatched tag = EntityManager.GetComponentData<ManualPoliceDispatched>(tracker);
-                Entity carEntity = tag.m_PoliceCarEntity;
-                uint age = currentFrame - tag.m_CreationFrame;
+                Entity targetEntity = tag.m_TargetEntity;
 
-                bool timedOut = age > TIMEOUT_FRAMES;
-                bool carGone = carEntity == Entity.Null || !EntityManager.Exists(carEntity)
-                               || !EntityManager.HasComponent<PoliceCar>(carEntity);
+                bool timedOut = (currentFrame - tag.m_CreationFrame) > TIMEOUT_FRAMES;
+                bool targetGone = targetEntity == Entity.Null || !EntityManager.Exists(targetEntity);
+                // Grace period: AccidentSite added via ECB (plays back at end of frame) — avoid
+                // false "resolved" detection for first 2 frames.
+                bool resolved = !targetGone
+                    && !EntityManager.HasComponent<AccidentSite>(targetEntity)
+                    && (currentFrame - tag.m_CreationFrame) > 2;
 
-                // ---- Heartbeat: re-assert dispatch every tick ----
-                bool shiftEnded = false;
-                if (!carGone && !timedOut)
+                if (shouldLog && !targetGone && !resolved)
                 {
-                    PoliceCar pc = EntityManager.GetComponentData<PoliceCar>(carEntity);
-                    shiftEnded = (pc.m_State & PoliceCarFlags.ShiftEnded) != 0;
-
-                    if (!shiftEnded)
-                    {
-                        bool needPathUpdate = false;
-
-                        // 1. Clear Returning if vanilla AI sent the car home prematurely.
-                        if ((pc.m_State & PoliceCarFlags.Returning) != 0)
-                        {
-                            pc.m_State &= ~PoliceCarFlags.Returning;
-                            EntityManager.SetComponentData(carEntity, pc);
-                            needPathUpdate = true;
-                            Mod.Log.Info($"[ManualCleanup] Police heartbeat: cleared Returning car={carEntity.Index} age={age}");
-                        }
-
-                        // 2. Keep ServiceDispatch empty so the station can't re-assign the car.
-                        if (EntityManager.HasBuffer<ServiceDispatch>(carEntity))
-                        {
-                            DynamicBuffer<ServiceDispatch> buf = EntityManager.GetBuffer<ServiceDispatch>(carEntity);
-                            if (buf.Length > 0)
-                            {
-                                buf.Clear();
-                                needPathUpdate = true;
-                            }
-                        }
-
-                        // 3. Ensure Emergency flags are maintained.
-                        Car car = EntityManager.GetComponentData<Car>(carEntity);
-                        if ((car.m_Flags & CarFlags.Emergency) == 0 || (car.m_Flags & CarFlags.AnyLaneTarget) != 0)
-                        {
-                            car.m_Flags |= CarFlags.Emergency | CarFlags.StayOnRoad | CarFlags.UsePublicTransportLanes;
-                            car.m_Flags &= ~CarFlags.AnyLaneTarget;
-                            EntityManager.SetComponentData(carEntity, car);
-                        }
-
-                        // 4. Re-apply Target if vanilla AI redirected the car.
-                        if (EntityManager.HasComponent<Target>(carEntity))
-                        {
-                            Target currentTarget = EntityManager.GetComponentData<Target>(carEntity);
-                            if (currentTarget.m_Target != tag.m_TargetEntity)
-                            {
-                                EntityManager.SetComponentData(carEntity, new Target(tag.m_TargetEntity));
-                                needPathUpdate = true;
-                            }
-                        }
-
-                        // 5. Trigger pathfinding only when something changed, not every tick.
-                        if (needPathUpdate && EntityManager.HasComponent<PathOwner>(carEntity))
-                        {
-                            PathOwner pathOwner = EntityManager.GetComponentData<PathOwner>(carEntity);
-                            if ((pathOwner.m_State & PathFlags.Updated) == 0)
-                            {
-                                pathOwner.m_State |= PathFlags.Updated;
-                                EntityManager.SetComponentData(carEntity, pathOwner);
-                            }
-                        }
-                    }
+                    AccidentSite site = EntityManager.GetComponentData<AccidentSite>(targetEntity);
+                    uint age = currentFrame - tag.m_CreationFrame;
+                    Mod.Log.Info($"[ManualCleanup] DIAG police tracker={tracker.Index} target={targetEntity.Index} " +
+                        $"flags=0x{(uint)site.m_Flags:X} age={age}");
                 }
 
-                // ---- DIAG log ----
-                if (shouldLog && !carGone)
+                if (timedOut || targetGone || resolved)
                 {
-                    PoliceCar pcLog = EntityManager.GetComponentData<PoliceCar>(carEntity);
-                    Car carLog = EntityManager.GetComponentData<Car>(carEntity);
-                    PathOwner pathOwnerLog = EntityManager.GetComponentData<PathOwner>(carEntity);
-                    Mod.Log.Info($"[ManualCleanup] DIAG police tracker={tracker.Index} car={carEntity.Index} " +
-                        $"target={tag.m_TargetEntity.Index} state=0x{(uint)pcLog.m_State:X} " +
-                        $"carFlags=0x{(uint)carLog.m_Flags:X} " +
-                        $"pathState=0x{(uint)pathOwnerLog.m_State:X} age={age}");
-                }
+                    string reason = timedOut ? "timeout" : targetGone ? "targetGone" : "resolved";
+                    Mod.Log.Info($"[ManualCleanup] Police cleanup: tracker={tracker.Index} target={targetEntity.Index} " +
+                        $"reason={reason} age={currentFrame - tag.m_CreationFrame}");
 
-                // ---- Cleanup conditions ----
-                // carReturning is no longer a trigger — heartbeat clears it unless shift ended.
-                bool closeEnough = false;
-                if (!carGone && !shiftEnded && age > 120
-                    && tag.m_TargetEntity != Entity.Null
-                    && EntityManager.Exists(tag.m_TargetEntity)
-                    && EntityManager.HasComponent<Game.Objects.Transform>(carEntity)
-                    && EntityManager.HasComponent<Game.Objects.Transform>(tag.m_TargetEntity))
-                {
-                    float3 carPos = EntityManager.GetComponentData<Game.Objects.Transform>(carEntity).m_Position;
-                    float3 targetPos = EntityManager.GetComponentData<Game.Objects.Transform>(tag.m_TargetEntity).m_Position;
-                    closeEnough = math.distancesq(carPos, targetPos) < (100f * 100f);
-                }
+                    if (!targetGone && !resolved && EntityManager.HasComponent<AccidentSite>(targetEntity))
+                        ecb.RemoveComponent<AccidentSite>(targetEntity);
 
-                if (timedOut || carGone || shiftEnded || closeEnough)
-                {
-                    string reason = timedOut ? "timeout" : carGone ? "carGone" : shiftEnded ? "shiftEnded" : "closeEnough";
-                    Mod.Log.Info($"[ManualCleanup] Police cleanup: tracker={tracker.Index} car={carEntity.Index} " +
-                        $"reason={reason} age={age}");
-
-                    Entity requestEntity = tag.m_RequestEntity;
-                    if (requestEntity != Entity.Null && EntityManager.Exists(requestEntity))
-                    {
-                        EntityManager.DestroyEntity(requestEntity);
-                    }
+                    Entity eventEntity = tag.m_EventEntity;
+                    if (eventEntity != Entity.Null && EntityManager.Exists(eventEntity))
+                        EntityManager.DestroyEntity(eventEntity);
 
                     EntityManager.DestroyEntity(tracker);
                     policeCleaned++;

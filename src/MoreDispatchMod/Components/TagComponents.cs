@@ -34,8 +34,7 @@ namespace MoreDispatchMod.Components
     {
         public uint m_CreationFrame;
         public Entity m_TargetEntity;
-        public Entity m_PoliceCarEntity;
-        public Entity m_RequestEntity;
+        public Entity m_EventEntity;  // crime event entity (same role as ManualCrimeDispatched.m_EventEntity)
     }
 
     /// <summary>
