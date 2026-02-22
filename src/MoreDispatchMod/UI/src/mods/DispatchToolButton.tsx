@@ -7,11 +7,13 @@ import {
     fireEnabled$,
     emsEnabled$,
     crimeEnabled$,
+    areaCrimeEnabled$,
     toggleTool,
     togglePolice,
     toggleFire,
     toggleEMS,
     toggleCrime,
+    toggleAreaCrime,
 } from "./bindings";
 import styles from "./DispatchToolButton.module.scss";
 
@@ -22,6 +24,7 @@ export const DispatchToolButton = () => {
     const fireOn = useValue(fireEnabled$);
     const emsOn = useValue(emsEnabled$);
     const crimeOn = useValue(crimeEnabled$);
+    const areaCrimeOn = useValue(areaCrimeEnabled$);
 
     return (
         <>
@@ -77,7 +80,16 @@ export const DispatchToolButton = () => {
                             onSelect={toggleCrime}
                         >
                             <img src="coui://uil/Standard/Crime.svg" className={styles.optionIcon} />
-                            <span>Crime</span>
+                            <span>Single Crime</span>
+                        </Button>
+                        <Button
+                            variant="flat"
+                            className={`${styles.option} ${areaCrimeOn ? styles.active : ""}`}
+                            selected={areaCrimeOn}
+                            onSelect={toggleAreaCrime}
+                        >
+                            <img src="coui://uil/Standard/Crime.svg" className={styles.optionIcon} />
+                            <span>Area Crime</span>
                         </Button>
                     </div>
                 </div>
