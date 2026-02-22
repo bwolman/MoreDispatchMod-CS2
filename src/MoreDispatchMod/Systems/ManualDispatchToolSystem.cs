@@ -319,9 +319,13 @@ namespace MoreDispatchMod.Systems
             policeCar.m_RequestCount = 1;
             EntityManager.SetComponentData(bestCar, policeCar);
 
-            // Set emergency car flags — sirens and lights
+            // Set emergency car flags — sirens and lights.
+            // Also clear AnyLaneTarget: vanilla SelectNextDispatch() always clears it when
+            // activating emergency dispatch. If left set alongside Emergency, PathSystem may
+            // calculate a patrol-style path (elevated/transit lane positions) causing floating.
             Car car = EntityManager.GetComponentData<Car>(bestCar);
             car.m_Flags |= CarFlags.Emergency | CarFlags.StayOnRoad | CarFlags.UsePublicTransportLanes;
+            car.m_Flags &= ~CarFlags.AnyLaneTarget;
             EntityManager.SetComponentData(bestCar, car);
 
             // Set navigation target

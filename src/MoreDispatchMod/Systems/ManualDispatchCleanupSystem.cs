@@ -4,6 +4,7 @@ using Game.Citizens;
 using Game.Common;
 using Game.Events;
 using Game.Objects;
+using Game.Pathfind;
 using Game.Simulation;
 using Game.Tools;
 using Game.Vehicles;
@@ -133,10 +134,12 @@ namespace MoreDispatchMod.Systems
                 {
                     PoliceCar pcLog = EntityManager.GetComponentData<PoliceCar>(carEntity);
                     Car carLog = EntityManager.GetComponentData<Car>(carEntity);
+                    PathOwner pathOwnerLog = EntityManager.GetComponentData<PathOwner>(carEntity);
                     uint age = currentFrame - tag.m_CreationFrame;
                     Mod.Log.Info($"[ManualCleanup] DIAG police tracker={tracker.Index} car={carEntity.Index} " +
                         $"target={tag.m_TargetEntity.Index} state=0x{(uint)pcLog.m_State:X} " +
-                        $"carFlags=0x{(uint)carLog.m_Flags:X} age={age}");
+                        $"carFlags=0x{(uint)carLog.m_Flags:X} " +
+                        $"pathState=0x{(uint)pathOwnerLog.m_State:X} age={age}");
                 }
 
                 bool gracePeriodPassed = (currentFrame - tag.m_CreationFrame) > 120;

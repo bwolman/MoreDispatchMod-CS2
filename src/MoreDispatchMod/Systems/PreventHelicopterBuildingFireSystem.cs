@@ -102,9 +102,12 @@ namespace MoreDispatchMod.Systems
                     continue; // remote forest fire — let helicopter respond
 
                 // Cancel: building fire or road-accessible forest fire
+                // Provide the helicopter entity so HandleRequestSystem can recall it.
+                // Without a vehicle, HandleRequestSystem has nothing to recall — the heli
+                // keeps flying and the game spawns a new request, creating an infinite loop.
                 Entity handleEntity = EntityManager.CreateEntity();
                 EntityManager.AddComponentData(handleEntity, new HandleRequest(
-                    requestEntity, Entity.Null, true));
+                    requestEntity, vehicleEntity, true));
 
                 cancelled++;
 
