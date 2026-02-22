@@ -5,6 +5,8 @@ using Game.Simulation;
 using Game.Tools;
 using Game.Vehicles;
 
+using MoreDispatchMod.Components;
+
 using Unity.Collections;
 using Unity.Entities;
 
@@ -24,7 +26,10 @@ namespace MoreDispatchMod.Systems
                 ComponentType.ReadOnly<Dispatched>(),
                 ComponentType.ReadOnly<ServiceRequest>(),
                 ComponentType.Exclude<Deleted>(),
-                ComponentType.Exclude<Temp>());
+                ComponentType.Exclude<Temp>(),
+                // Skip requests already cancelled this cycle — prevents double-cancel on the
+                // frame between our HandleRequest creation and HandleRequestSystem processing.
+                ComponentType.Exclude<HelicopterCancelled>());
 
             Mod.Log.Info("[PreventHelicopterBuildingFire] OnCreate complete");
         }
@@ -101,13 +106,33 @@ namespace MoreDispatchMod.Systems
                 if (!isBuilding && !engineAlsoDispatched)
                     continue; // remote forest fire — let helicopter respond
 
-                // Cancel: building fire or road-accessible forest fire
+                // Cancel: building fire or road-accessible forest fire.
                 // Provide the helicopter entity so HandleRequestSystem can recall it.
-                // Without a vehicle, HandleRequestSystem has nothing to recall — the heli
-                // keeps flying and the game spawns a new request, creating an infinite loop.
                 Entity handleEntity = EntityManager.CreateEntity();
                 EntityManager.AddComponentData(handleEntity, new HandleRequest(
                     requestEntity, vehicleEntity, true));
+
+                // Mark the request as cancelled so our query skips it next frame (before
+                // HandleRequestSystem has destroyed it). This prevents double-cancel.
+                // HelicopterCancelled lives on the non-rendered request entity — safe.
+                EntityManager.AddComponentData(requestEntity, new HelicopterCancelled());
+
+                // Also remove the request from the helicopter's ServiceDispatch buffer.
+                // HandleRequest destroys the request entity but may not clear the vehicle's
+                // buffer entry — the aircraft AI keeps flying if it still sees a pending
+                // dispatch. Removing the entry directly forces the helicopter to return.
+                if (EntityManager.HasBuffer<ServiceDispatch>(vehicleEntity))
+                {
+                    DynamicBuffer<ServiceDispatch> heliBuffer = EntityManager.GetBuffer<ServiceDispatch>(vehicleEntity);
+                    for (int j = heliBuffer.Length - 1; j >= 0; j--)
+                    {
+                        if (heliBuffer[j].m_Request == requestEntity)
+                        {
+                            heliBuffer.RemoveAt(j);
+                            break;
+                        }
+                    }
+                }
 
                 cancelled++;
 

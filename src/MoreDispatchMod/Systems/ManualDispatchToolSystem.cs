@@ -338,28 +338,18 @@ namespace MoreDispatchMod.Systems
                 $"carFlags=0x{(uint)preCarFlags.m_Flags:X} target={preTarget.m_Target.Index} " +
                 $"pathState=0x{(uint)prePathOwner.m_State:X} dispatches={preDispatches.Length} requestCount={preState.m_RequestCount}");
 
-            // Create request entity (non-rendered — safe for direct EntityManager)
-            Entity request = EntityManager.CreateEntity();
-            EntityManager.AddComponentData(request, new ServiceRequest());
-            EntityManager.AddComponentData(request, new PoliceEmergencyRequest(
-                entity, entity, 5f, PolicePurpose.Emergency));
-
-            Mod.Log.Info($"[ManualDispatch] Police: created request entity {request.Index}");
-
-            // Inject ServiceDispatch so ResetPath reads our request and maintains Emergency flags
+            // Clear existing ServiceDispatch entries so the car's patrol assignments don't
+            // compete. We do NOT add a new request entity here — PoliceCarAISystem.ValidateSite()
+            // requires m_Site to have an AccidentSite component, which our target building lacks,
+            // causing the car to return after ~64 frames. ManualDispatchCleanupSystem maintains
+            // the dispatch via a per-tick heartbeat instead.
             DynamicBuffer<ServiceDispatch> dispatches = EntityManager.GetBuffer<ServiceDispatch>(bestCar);
             dispatches.Clear();
-            dispatches.Add(new ServiceDispatch(request));
-
-            // Set request count to match buffer length
-            Game.Vehicles.PoliceCar policeCar = EntityManager.GetComponentData<Game.Vehicles.PoliceCar>(bestCar);
-            policeCar.m_RequestCount = 1;
-            EntityManager.SetComponentData(bestCar, policeCar);
 
             // Set emergency car flags — sirens and lights.
-            // Also clear AnyLaneTarget: vanilla SelectNextDispatch() always clears it when
-            // activating emergency dispatch. If left set alongside Emergency, PathSystem may
-            // calculate a patrol-style path (elevated/transit lane positions) causing floating.
+            // Clear AnyLaneTarget: vanilla SelectNextDispatch() always clears it when activating
+            // emergency dispatch. If left set alongside Emergency, PathSystem may calculate a
+            // patrol-style path (elevated/transit lane positions) causing the floating effect.
             Car car = EntityManager.GetComponentData<Car>(bestCar);
             car.m_Flags |= CarFlags.Emergency | CarFlags.StayOnRoad | CarFlags.UsePublicTransportLanes;
             car.m_Flags &= ~CarFlags.AnyLaneTarget;
@@ -394,7 +384,7 @@ namespace MoreDispatchMod.Systems
                 m_CreationFrame = currentFrame,
                 m_TargetEntity = entity,
                 m_PoliceCarEntity = bestCar,
-                m_RequestEntity = request
+                m_RequestEntity = Entity.Null  // no request entity — heartbeat maintains dispatch
             });
 
             // Log post-modification state
