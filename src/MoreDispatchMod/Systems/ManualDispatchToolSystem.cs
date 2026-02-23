@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 using Game;
 using Game.Buildings;
 using Game.Citizens;
@@ -32,6 +34,9 @@ namespace MoreDispatchMod.Systems
         public bool AreaCrimeEnabled { get; set; }
 
         private const uint REQUEST_GROUP_EMERGENCY = 4u;
+        private const int AREA_CRIME_BATCH_SIZE = 20;
+        private readonly Queue<Entity> m_AreaCrimeQueue = new Queue<Entity>();
+        private readonly List<Entity> m_InFlightBatch = new List<Entity>();
 
         private ToolOutputBarrier m_Barrier;
         private SimulationSystem m_SimulationSystem;
@@ -123,6 +128,8 @@ namespace MoreDispatchMod.Systems
             }
 
             m_PreviousRaycastEntity = Entity.Null;
+            m_AreaCrimeQueue.Clear();
+            m_InFlightBatch.Clear();
         }
 
         public override void InitializeRaycast()
@@ -133,6 +140,41 @@ namespace MoreDispatchMod.Systems
 
         protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
+            // Drain area crime queue: wait for AccidentSite confirmation before next batch
+            if (m_AreaCrimeQueue.Count > 0)
+            {
+                bool batchReady = m_InFlightBatch.Count == 0;
+                if (!batchReady)
+                {
+                    batchReady = true;
+                    foreach (Entity b in m_InFlightBatch)
+                    {
+                        if (!EntityManager.Exists(b) || !EntityManager.HasComponent<AccidentSite>(b))
+                        {
+                            batchReady = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (batchReady)
+                {
+                    m_InFlightBatch.Clear();
+                    int n = math.min(AREA_CRIME_BATCH_SIZE, m_AreaCrimeQueue.Count);
+                    for (int i = 0; i < n; i++)
+                    {
+                        Entity building = m_AreaCrimeQueue.Dequeue();
+                        if (EntityManager.Exists(building))
+                        {
+                            CreateCrimeDispatch(building);
+                            m_InFlightBatch.Add(building);
+                        }
+                    }
+                    if (m_InFlightBatch.Count > 0)
+                        Mod.Log.Info($"[ManualDispatch] AreaCrime batch: dispatched={m_InFlightBatch.Count} remaining={m_AreaCrimeQueue.Count}");
+                }
+            }
+
             bool raycastHit = GetRaycastResult(out Entity hitEntity, out RaycastHit hit);
 
             // --- Highlight management ---
@@ -490,32 +532,28 @@ namespace MoreDispatchMod.Systems
             float radius = Mod.Settings.AreaCrimeRadius;
             float radiusSq = radius * radius;
 
+            m_AreaCrimeQueue.Clear();
+            m_InFlightBatch.Clear();
+
             var buildings = m_BuildingQuery.ToEntityArray(Allocator.Temp);
-            int dispatched = 0;
+            int enqueued = 0;
             int skipped = 0;
 
             for (int i = 0; i < buildings.Length; i++)
             {
                 Entity building = buildings[i];
                 float3 pos = EntityManager.GetComponentData<Game.Objects.Transform>(building).m_Position;
-
-                // Use 2D (XZ) distance to ignore elevation differences on hilly terrain
                 float distSq = math.distancesq(
                     new float2(pos.x, pos.z),
                     new float2(center.x, center.z));
 
-                if (distSq > radiusSq)
-                {
-                    skipped++;
-                    continue;
-                }
-
-                CreateCrimeDispatch(building);
-                dispatched++;
+                if (distSq > radiusSq) { skipped++; continue; }
+                m_AreaCrimeQueue.Enqueue(building);
+                enqueued++;
             }
 
             buildings.Dispose();
-            Mod.Log.Info($"[ManualDispatch] AreaCrime: center=({center.x:F0},{center.z:F0}) radius={radius}m dispatched={dispatched} skipped={skipped}");
+            Mod.Log.Info($"[ManualDispatch] AreaCrime: center=({center.x:F0},{center.z:F0}) radius={radius}m enqueued={enqueued} skipped={skipped}");
         }
     }
 }
