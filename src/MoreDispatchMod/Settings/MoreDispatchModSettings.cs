@@ -26,10 +26,6 @@ namespace MoreDispatchMod.Settings
         public bool AllowMultiplePolicePerBuilding { get; set; }
 
         [SettingsUISection("General", "Dispatch")]
-        [SettingsUISlider(min = 25, max = 500, step = 25)]
-        public int AreaCrimeRadius { get; set; }
-
-        [SettingsUISection("General", "Dispatch")]
         [SettingsUIButton]
         [SettingsUIConfirmation]
         public bool ResetSettings
@@ -47,7 +43,6 @@ namespace MoreDispatchMod.Settings
             DispatchFireToMedicalCalls = false;
             PreventHelicopterBuildingFires = false;
             AllowMultiplePolicePerBuilding = false;
-            AreaCrimeRadius = 100;
         }
     }
 }

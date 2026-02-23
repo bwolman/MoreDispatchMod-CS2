@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 using Game;
 using Game.Buildings;
 using Game.Citizens;
@@ -7,7 +5,6 @@ using Game.Common;
 using Game.Events;
 using Game.Input;
 using Game.Objects;
-using Game.Pathfind;
 using Game.Prefabs;
 using Game.Rendering;
 using Game.Simulation;
@@ -19,8 +16,6 @@ using MoreDispatchMod.Components;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
-using Unity.Mathematics;
-using UnityEngine;
 
 namespace MoreDispatchMod.Systems
 {
@@ -32,14 +27,12 @@ namespace MoreDispatchMod.Systems
         public bool FireEnabled { get; set; }
         public bool EMSEnabled { get; set; }
         public bool CrimeEnabled { get; set; }
-        public bool AreaCrimeEnabled { get; set; }
 
         private const uint REQUEST_GROUP_EMERGENCY = 4u;
-        private const int AREA_CRIME_MAX_DISPATCH = 5;  // conservative; raise after verifying safe concurrent limit
+        private const int CRIME_DISPATCH_CAP = 5;
 
         private ToolOutputBarrier m_Barrier;
         private SimulationSystem m_SimulationSystem;
-        private OverlayRenderSystem m_OverlayRenderSystem;
         private EntityQuery m_HighlightedQuery;
         private EntityQuery m_CitizenQuery;
         private EntityQuery m_PoliceDispatchedQuery;
@@ -47,10 +40,6 @@ namespace MoreDispatchMod.Systems
         private EntityQuery m_EMSDispatchedQuery;
         private EntityQuery m_CrimeDispatchedQuery;
         private EntityQuery m_CrimePrefabQuery;
-        private EntityQuery m_BuildingQuery;
-        private EntityQuery m_PoliceCarQuery;
-        private EntityQuery m_PoliceStationQuery;
-        private EntityQuery m_AreaCrimeTrackerQuery;
         private Entity m_PreviousRaycastEntity;
 
         public override PrefabBase GetPrefab()
@@ -70,7 +59,6 @@ namespace MoreDispatchMod.Systems
 
             m_Barrier = World.GetOrCreateSystemManaged<ToolOutputBarrier>();
             m_SimulationSystem = World.GetOrCreateSystemManaged<SimulationSystem>();
-            m_OverlayRenderSystem = World.GetOrCreateSystemManaged<OverlayRenderSystem>();
 
             m_HighlightedQuery = GetEntityQuery(
                 ComponentType.ReadOnly<Highlighted>(),
@@ -99,32 +87,6 @@ namespace MoreDispatchMod.Systems
             m_CrimePrefabQuery = GetEntityQuery(
                 ComponentType.ReadOnly<CrimeData>(),
                 ComponentType.ReadOnly<PrefabData>());
-
-            m_BuildingQuery = GetEntityQuery(
-                ComponentType.ReadOnly<Building>(),
-                ComponentType.ReadOnly<Game.Objects.Transform>(),
-                ComponentType.Exclude<Deleted>(),
-                ComponentType.Exclude<Temp>());
-
-            m_PoliceCarQuery = GetEntityQuery(
-                ComponentType.ReadOnly<Game.Vehicles.PoliceCar>(),
-                ComponentType.ReadOnly<Car>(),
-                ComponentType.ReadOnly<CarCurrentLane>(),
-                ComponentType.ReadOnly<PathOwner>(),
-                ComponentType.ReadOnly<Owner>(),
-                ComponentType.ReadOnly<ServiceDispatch>(),
-                ComponentType.ReadOnly<Game.Objects.Transform>(),
-                ComponentType.Exclude<Deleted>(),
-                ComponentType.Exclude<Temp>());
-
-            m_PoliceStationQuery = GetEntityQuery(
-                ComponentType.ReadOnly<Game.Buildings.PoliceStation>(),
-                ComponentType.ReadOnly<Game.Objects.Transform>(),
-                ComponentType.Exclude<Deleted>(),
-                ComponentType.Exclude<Temp>());
-
-            m_AreaCrimeTrackerQuery = GetEntityQuery(
-                ComponentType.ReadOnly<ManualAreaCrimeDispatched>());
 
             Mod.Log.Info("[ManualDispatchTool] OnCreate complete");
         }
@@ -160,7 +122,7 @@ namespace MoreDispatchMod.Systems
 
         protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
-            bool raycastHit = GetRaycastResult(out Entity hitEntity, out RaycastHit hit);
+            bool raycastHit = GetRaycastResult(out Entity hitEntity, out _);
 
             // --- Highlight management ---
             // Highlighted/BatchesUpdated are vanilla components used by all tool systems.
@@ -178,26 +140,6 @@ namespace MoreDispatchMod.Systems
                 ecb.AddComponent<Highlighted>(hitEntity);
                 ecb.AddComponent<BatchesUpdated>(hitEntity);
                 m_PreviousRaycastEntity = hitEntity;
-            }
-
-            // --- Area Crime overlay ---
-            // Draw a radius circle at the raycast hit position when Area Crime mode is on.
-            if (AreaCrimeEnabled && raycastHit)
-            {
-                OverlayRenderSystem.Buffer overlayBuffer = m_OverlayRenderSystem.GetBuffer(out JobHandle overlayDeps);
-                overlayDeps.Complete();
-
-                float radius = Mod.Settings.AreaCrimeRadius;
-                overlayBuffer.DrawCircle(
-                    new UnityEngine.Color(1.0f, 0.3f, 0.0f, 0.9f),      // outline: bright orange
-                    new UnityEngine.Color(0.85f, 0.15f, 0.15f, 0.25f),  // fill: semi-transparent red
-                    0f,                                                    // dash length (0 = solid)
-                    0,                                                     // styleFlags
-                    new float2(0f, 1f),                                    // surface normal (Y-up terrain)
-                    hit.m_HitPosition,
-                    radius * 2f);                                          // DrawCircle takes diameter
-
-                m_OverlayRenderSystem.AddBufferWriter(Dependency);
             }
 
             // --- Dispatch on click ---
@@ -231,11 +173,6 @@ namespace MoreDispatchMod.Systems
                 if (CrimeEnabled && isBuilding)
                 {
                     CreateCrimeDispatch(hitEntity);
-                }
-
-                if (AreaCrimeEnabled)
-                {
-                    CreateAreaCrimeDispatch(hit.m_HitPosition);
                 }
             }
 
@@ -431,6 +368,7 @@ namespace MoreDispatchMod.Systems
             // Check if this target already has a crime dispatch tracker
             var crimeTrackers = m_CrimeDispatchedQuery.ToEntityArray(Allocator.Temp);
             bool alreadyTargeted = false;
+            int activeCount = crimeTrackers.Length;
             for (int i = 0; i < crimeTrackers.Length; i++)
             {
                 ManualCrimeDispatched existing = EntityManager.GetComponentData<ManualCrimeDispatched>(crimeTrackers[i]);
@@ -450,6 +388,13 @@ namespace MoreDispatchMod.Systems
             if (EntityManager.HasComponent<AccidentSite>(buildingEntity))
             {
                 Mod.Log.Info($"[ManualDispatch] Building {buildingEntity.Index} already has AccidentSite, skipping crime");
+                return;
+            }
+
+            // Cap concurrent crime dispatches to prevent BatchUploadSystem crash from too many AccidentSites
+            if (activeCount >= CRIME_DISPATCH_CAP)
+            {
+                Mod.Log.Info($"[ManualDispatch] Crime cap reached ({CRIME_DISPATCH_CAP}), skipping building {buildingEntity.Index}");
                 return;
             }
 
@@ -510,154 +455,6 @@ namespace MoreDispatchMod.Systems
             });
 
             Mod.Log.Info($"[ManualDispatch] Crime tracker created for building {buildingEntity.Index} (tracker={tracker.Index})");
-        }
-
-        private void CreateAreaCrimeDispatch(float3 center)
-        {
-            float radius = Mod.Settings.AreaCrimeRadius;
-            float radiusSq = radius * radius;
-            uint currentFrame = m_SimulationSystem.frameIndex;
-
-            // ---- 1. Collect candidate buildings sorted by distance ----
-            var allBuildings = m_BuildingQuery.ToEntityArray(Allocator.Temp);
-            var candidates = new List<(Entity building, float distSq)>();
-            for (int i = 0; i < allBuildings.Length; i++)
-            {
-                Entity b = allBuildings[i];
-                float3 pos = EntityManager.GetComponentData<Game.Objects.Transform>(b).m_Position;
-                float d = math.distancesq(new float2(pos.x, pos.z), new float2(center.x, center.z));
-                if (d <= radiusSq) candidates.Add((b, d));
-            }
-            allBuildings.Dispose();
-            candidates.Sort((a, b) => a.distSq.CompareTo(b.distSq));
-
-            // ---- 2. Build busy-car / busy-building sets from existing trackers ----
-            var trackers = m_AreaCrimeTrackerQuery.ToEntityArray(Allocator.Temp);
-            var busyCars = new HashSet<Entity>();
-            var busyBuildings = new HashSet<Entity>();
-            for (int i = 0; i < trackers.Length; i++)
-            {
-                var t = EntityManager.GetComponentData<ManualAreaCrimeDispatched>(trackers[i]);
-                busyCars.Add(t.m_CarEntity);
-                busyBuildings.Add(t.m_TargetBuilding);
-            }
-            trackers.Dispose();
-
-            // ---- 3. Index available police cars by their owner station ----
-            var allCars = m_PoliceCarQuery.ToEntityArray(Allocator.Temp);
-            var carsByStation = new Dictionary<Entity, List<Entity>>();
-            for (int i = 0; i < allCars.Length; i++)
-            {
-                Entity car = allCars[i];
-                if (busyCars.Contains(car)) continue;
-
-                Game.Vehicles.PoliceCar pc = EntityManager.GetComponentData<Game.Vehicles.PoliceCar>(car);
-                if ((pc.m_State & (PoliceCarFlags.Returning | PoliceCarFlags.AtTarget
-                                 | PoliceCarFlags.ShiftEnded | PoliceCarFlags.Disabled)) != 0)
-                    continue;
-                if (pc.m_RequestCount > 1) continue;
-                if (!EntityManager.HasComponent<Owner>(car)) continue;
-
-                Entity station = EntityManager.GetComponentData<Owner>(car).m_Owner;
-                if (!carsByStation.ContainsKey(station))
-                    carsByStation[station] = new List<Entity>();
-                carsByStation[station].Add(car);
-            }
-            allCars.Dispose();
-
-            var stationEntities = m_PoliceStationQuery.ToEntityArray(Allocator.Temp);
-
-            // ---- 4. For each candidate building, dispatch from the nearest available station ----
-            int dispatched = 0;
-            for (int i = 0; i < candidates.Count && dispatched < AREA_CRIME_MAX_DISPATCH; i++)
-            {
-                Entity building = candidates[i].building;
-                if (busyBuildings.Contains(building)) continue;
-
-                float3 buildingPos = EntityManager.GetComponentData<Game.Objects.Transform>(building).m_Position;
-
-                // Find nearest station that has an available car
-                Entity bestStation = Entity.Null;
-                float bestDist = float.MaxValue;
-                for (int s = 0; s < stationEntities.Length; s++)
-                {
-                    Entity station = stationEntities[s];
-                    if (!carsByStation.ContainsKey(station) || carsByStation[station].Count == 0)
-                        continue;
-                    float3 stPos = EntityManager.GetComponentData<Game.Objects.Transform>(station).m_Position;
-                    float d = math.distancesq(new float2(stPos.x, stPos.z),
-                                              new float2(buildingPos.x, buildingPos.z));
-                    if (d < bestDist) { bestDist = d; bestStation = station; }
-                }
-
-                if (bestStation == Entity.Null)
-                {
-                    Mod.Log.Info($"[ManualDispatch] AreaCrime: no available car for building {building.Index}, skipping");
-                    continue;
-                }
-
-                Entity car = carsByStation[bestStation][0];
-                carsByStation[bestStation].RemoveAt(0); // prevent double-assignment
-                busyBuildings.Add(building);
-
-                // ---- 5. Path D2: create PoliceEmergencyRequest + inject into car's ServiceDispatch ----
-                // All operations below are SetComponentData / buffer ops — safe on rendered entities.
-                Entity request = EntityManager.CreateEntity();
-                EntityManager.AddComponentData(request, new ServiceRequest());
-                EntityManager.AddComponentData(request, new PoliceEmergencyRequest
-                {
-                    m_Site = building,
-                    m_Target = building,
-                    m_Priority = 1f,
-                    m_Purpose = PolicePurpose.Emergency
-                });
-
-                var dispatchBuf = EntityManager.GetBuffer<ServiceDispatch>(car);
-                dispatchBuf.Clear();
-                dispatchBuf.Add(new ServiceDispatch { m_Request = request });
-
-                Car carComp = EntityManager.GetComponentData<Car>(car);
-                carComp.m_Flags |= CarFlags.Emergency | CarFlags.StayOnRoad
-                                 | CarFlags.UsePublicTransportLanes;
-                carComp.m_Flags &= ~CarFlags.AnyLaneTarget;
-                EntityManager.SetComponentData(car, carComp);
-
-                Game.Vehicles.PoliceCar policeCar = EntityManager.GetComponentData<Game.Vehicles.PoliceCar>(car);
-                policeCar.m_State |= PoliceCarFlags.AccidentTarget;
-                policeCar.m_State &= ~(PoliceCarFlags.Returning | PoliceCarFlags.AtTarget
-                                     | PoliceCarFlags.Cancelled);
-                EntityManager.SetComponentData(car, policeCar);
-
-                EntityManager.SetComponentData(car, new Target(building));
-
-                CarCurrentLane currentLane = EntityManager.GetComponentData<CarCurrentLane>(car);
-                currentLane.m_LaneFlags &= ~CarLaneFlags.EndOfPath;
-                EntityManager.SetComponentData(car, currentLane);
-
-                PathOwner pathOwner = EntityManager.GetComponentData<PathOwner>(car);
-                pathOwner.m_State |= PathFlags.Updated;
-                EntityManager.SetComponentData(car, pathOwner);
-                // Note: do NOT AddComponent<EffectsUpdated> — structural change on a vehicle.
-                // PoliceCarAISystem.ResetPath() adds it after path recalculation.
-
-                Entity tracker = EntityManager.CreateEntity();
-                EntityManager.AddComponentData(tracker, new ManualAreaCrimeDispatched
-                {
-                    m_CreationFrame = currentFrame,
-                    m_CarEntity = car,
-                    m_TargetBuilding = building,
-                    m_RequestEntity = request
-                });
-
-                Mod.Log.Info($"[ManualDispatch] AreaCrime D2: car={car.Index} (station={bestStation.Index}) " +
-                    $"→ building={building.Index} (tracker={tracker.Index} request={request.Index})");
-                dispatched++;
-            }
-            stationEntities.Dispose();
-
-            Mod.Log.Info($"[ManualDispatch] AreaCrime: center=({center.x:F0},{center.z:F0}) " +
-                $"radius={radius}m buildings={candidates.Count} dispatched={dispatched} " +
-                $"(cap={AREA_CRIME_MAX_DISPATCH})");
         }
     }
 }
