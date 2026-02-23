@@ -35,6 +35,7 @@ namespace MoreDispatchMod.Systems
 
         private const uint REQUEST_GROUP_EMERGENCY = 4u;
         private const int AREA_CRIME_BATCH_SIZE = 20;
+        private const int AREA_CRIME_MAX_BUILDINGS = 20;
         private readonly Queue<Entity> m_AreaCrimeQueue = new Queue<Entity>();
         private readonly List<Entity> m_InFlightBatch = new List<Entity>();
 
@@ -536,24 +537,32 @@ namespace MoreDispatchMod.Systems
             m_InFlightBatch.Clear();
 
             var buildings = m_BuildingQuery.ToEntityArray(Allocator.Temp);
-            int enqueued = 0;
-            int skipped = 0;
 
+            // Collect in-range buildings with their distances
+            var candidates = new List<(Entity building, float distSq)>();
             for (int i = 0; i < buildings.Length; i++)
             {
                 Entity building = buildings[i];
                 float3 pos = EntityManager.GetComponentData<Game.Objects.Transform>(building).m_Position;
-                float distSq = math.distancesq(
-                    new float2(pos.x, pos.z),
-                    new float2(center.x, center.z));
+                float distSq = math.distancesq(new float2(pos.x, pos.z), new float2(center.x, center.z));
+                if (distSq <= radiusSq)
+                    candidates.Add((building, distSq));
+            }
+            buildings.Dispose();
 
-                if (distSq > radiusSq) { skipped++; continue; }
-                m_AreaCrimeQueue.Enqueue(building);
+            // Sort by distance, take closest AREA_CRIME_MAX_BUILDINGS
+            candidates.Sort((a, b) => a.distSq.CompareTo(b.distSq));
+            int limit = math.min(AREA_CRIME_MAX_BUILDINGS, candidates.Count);
+
+            int enqueued = 0;
+            for (int i = 0; i < limit; i++)
+            {
+                m_AreaCrimeQueue.Enqueue(candidates[i].building);
                 enqueued++;
             }
 
-            buildings.Dispose();
-            Mod.Log.Info($"[ManualDispatch] AreaCrime: center=({center.x:F0},{center.z:F0}) radius={radius}m enqueued={enqueued} skipped={skipped}");
+            Mod.Log.Info($"[ManualDispatch] AreaCrime: center=({center.x:F0},{center.z:F0}) " +
+                $"radius={radius}m candidates={candidates.Count} enqueued={enqueued} (cap={AREA_CRIME_MAX_BUILDINGS})");
         }
     }
 }

@@ -242,14 +242,6 @@ namespace MoreDispatchMod.Systems
                 bool targetGone = targetEntity == Entity.Null || !EntityManager.Exists(targetEntity);
                 bool resolved = !targetGone && !EntityManager.HasComponent<AccidentSite>(targetEntity);
 
-                if (shouldLog && !targetGone && !resolved)
-                {
-                    AccidentSite accSite = EntityManager.GetComponentData<AccidentSite>(targetEntity);
-                    uint age = currentFrame - tag.m_CreationFrame;
-                    Mod.Log.Info($"[ManualCleanup] DIAG crime tracker={tracker.Index} target={targetEntity.Index} " +
-                        $"flags=0x{(uint)accSite.m_Flags:X} age={age}");
-                }
-
                 if (timedOut || targetGone || resolved)
                 {
                     // Pure timeout (building still exists, AccidentSite still present):
