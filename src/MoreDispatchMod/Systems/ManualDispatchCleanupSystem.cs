@@ -5,6 +5,7 @@ using Game.Common;
 using Game.Events;
 using Game.Simulation;
 using Game.Tools;
+using Game.Vehicles;
 
 using MoreDispatchMod.Components;
 
@@ -21,6 +22,7 @@ namespace MoreDispatchMod.Systems
         private EntityQuery m_FireTrackerQuery;
         private EntityQuery m_EMSTrackerQuery;
         private EntityQuery m_CrimeTrackerQuery;
+        private EntityQuery m_AreaCrimeTrackerQuery;
         private EndFrameBarrier m_EndFrameBarrier;
         private SimulationSystem m_SimulationSystem;
         private int m_LogCounter;
@@ -44,6 +46,9 @@ namespace MoreDispatchMod.Systems
 
             m_CrimeTrackerQuery = GetEntityQuery(
                 ComponentType.ReadOnly<ManualCrimeDispatched>());
+
+            m_AreaCrimeTrackerQuery = GetEntityQuery(
+                ComponentType.ReadOnly<ManualAreaCrimeDispatched>());
         }
 
         protected override void OnUpdate()
@@ -52,7 +57,8 @@ namespace MoreDispatchMod.Systems
             if (m_PoliceTrackerQuery.IsEmptyIgnoreFilter
                 && m_FireTrackerQuery.IsEmptyIgnoreFilter
                 && m_EMSTrackerQuery.IsEmptyIgnoreFilter
-                && m_CrimeTrackerQuery.IsEmptyIgnoreFilter)
+                && m_CrimeTrackerQuery.IsEmptyIgnoreFilter
+                && m_AreaCrimeTrackerQuery.IsEmptyIgnoreFilter)
             {
                 return;
             }
@@ -72,6 +78,7 @@ namespace MoreDispatchMod.Systems
             int fireCleaned = 0;
             int emsCleaned = 0;
             int crimeCleaned = 0;
+            int areaCrimeCleaned = 0;
 
             // =====================================================================
             // APPLY PHASE — add deferred structural changes to rendered entities.
@@ -273,10 +280,48 @@ namespace MoreDispatchMod.Systems
             }
             crimeTrackers.Dispose();
 
+            // --- Area Crime D2 (direct dispatch) cleanup ---
+            var areaCrimeTrackers = m_AreaCrimeTrackerQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < areaCrimeTrackers.Length; i++)
+            {
+                Entity tracker = areaCrimeTrackers[i];
+                ManualAreaCrimeDispatched tag = EntityManager.GetComponentData<ManualAreaCrimeDispatched>(tracker);
+                Entity car = tag.m_CarEntity;
+
+                bool timedOut = (currentFrame - tag.m_CreationFrame) > TIMEOUT_FRAMES;
+                bool carGone = car == Entity.Null || !EntityManager.Exists(car);
+                bool done = false;
+
+                if (!carGone)
+                {
+                    PoliceCar pc = EntityManager.GetComponentData<PoliceCar>(car);
+                    bool returning = (pc.m_State & PoliceCarFlags.Returning) != 0;
+                    // AccidentTarget may briefly clear during path recalculation (0-16 frames).
+                    // Only consider "done" if flag is absent AND > 32 frames since creation.
+                    bool notAccidentTarget = (pc.m_State & PoliceCarFlags.AccidentTarget) == 0;
+                    bool graceExpired = (currentFrame - tag.m_CreationFrame) > 32;
+                    done = returning || (notAccidentTarget && graceExpired);
+                }
+
+                if (timedOut || carGone || done)
+                {
+                    string reason = timedOut ? "timeout" : carGone ? "carGone" : "done";
+                    Mod.Log.Info($"[ManualCleanup] AreaCrimeD2 cleanup: tracker={tracker.Index} " +
+                        $"car={tag.m_CarEntity.Index} building={tag.m_TargetBuilding.Index} reason={reason}");
+
+                    if (tag.m_RequestEntity != Entity.Null && EntityManager.Exists(tag.m_RequestEntity))
+                        EntityManager.DestroyEntity(tag.m_RequestEntity);
+
+                    EntityManager.DestroyEntity(tracker);
+                    areaCrimeCleaned++;
+                }
+            }
+            areaCrimeTrackers.Dispose();
+
             if (shouldLog)
             {
                 Mod.Log.Info($"[ManualCleanup] Applied: fire={fireApplied} | " +
-                    $"Cleaned: police={policeCleaned} fire={fireCleaned} ems={emsCleaned} crime={crimeCleaned}");
+                    $"Cleaned: police={policeCleaned} fire={fireCleaned} ems={emsCleaned} crime={crimeCleaned} areaCrime={areaCrimeCleaned}");
             }
         }
     }

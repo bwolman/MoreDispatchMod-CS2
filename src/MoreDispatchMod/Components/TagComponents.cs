@@ -66,6 +66,19 @@ namespace MoreDispatchMod.Components
     }
 
     /// <summary>
+    /// Tracker for direct-dispatch area crime (Path D2). Lives on a separate non-rendered entity.
+    /// Tracks the dispatched police car, target building, and request entity for cleanup.
+    /// No AccidentSite is added to any building — avoids BatchUploadSystem GPU batch crash.
+    /// </summary>
+    public struct ManualAreaCrimeDispatched : IComponentData
+    {
+        public uint m_CreationFrame;
+        public Entity m_CarEntity;       // the dispatched police car
+        public Entity m_TargetBuilding;  // the building it was sent to
+        public Entity m_RequestEntity;   // the PoliceEmergencyRequest entity (needs cleanup)
+    }
+
+    /// <summary>
     /// Marker added to a FireRescueRequest entity after we have issued a HandleRequest cancel for it.
     /// Prevents PreventHelicopterBuildingFireSystem from issuing a second cancel on the next frame
     /// before HandleRequestSystem has had a chance to destroy the request entity.
