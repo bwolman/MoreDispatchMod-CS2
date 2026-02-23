@@ -142,12 +142,14 @@ namespace MoreDispatchMod.Systems
                     Mod.Log.Info($"[ManualCleanup] Police cleanup: tracker={tracker.Index} target={targetEntity.Index} " +
                         $"reason={reason} age={currentFrame - tag.m_CreationFrame}");
 
-                    // Destroying the event entity signals vanilla AccidentSiteSystem to remove
-                    // AccidentSite from the building safely on its next run (within 64 frames).
-                    // Do NOT call ecb.RemoveComponent<AccidentSite> — simultaneous structural
-                    // changes on many rendered buildings corrupt BatchUploadSystem GPU batches.
+                    // CRITICAL: Never destroy the event entity while AccidentSite may still be on
+                    // the building referencing it via m_Event. AccidentSiteSystem reads m_Event in a
+                    // burst job every 64 frames — if the entity is destroyed, it crashes (BatchUploadSystem).
+                    // Only destroy the event entity if the building itself is gone (orphaned entity).
+                    // In all other cases, let AccidentSiteSystem own the event entity lifecycle; it will
+                    // destroy the event entity when it removes AccidentSite naturally.
                     Entity eventEntity = tag.m_EventEntity;
-                    if (eventEntity != Entity.Null && EntityManager.Exists(eventEntity))
+                    if (targetGone && eventEntity != Entity.Null && EntityManager.Exists(eventEntity))
                         EntityManager.DestroyEntity(eventEntity);
 
                     EntityManager.DestroyEntity(tracker);
@@ -220,15 +222,6 @@ namespace MoreDispatchMod.Systems
             emsTrackers.Dispose();
 
             // --- Crime cleanup ---
-            // Rate-limit pure-TIMEOUT cleanups to 5 per 64-frame window (keyed to shouldLog).
-            // AccidentSiteSystem runs every 64 frames; destroying ≤5 event entities per window
-            // means it sees at most ~10 AccidentSite removals per run — comparable to normal
-            // gameplay. Without this limit, many simultaneous event destructions cause
-            // AccidentSiteSystem to issue many RemoveComponent<AccidentSite> calls at once,
-            // which crashes BatchUploadSystem via its ECB playback.
-            // Resolved/targetGone cleanups are NOT rate-limited — they happen naturally slowly.
-            int crimeTimeoutBudget = shouldLog ? 5 : 0;
-
             for (int i = 0; i < crimeTrackers.Length; i++)
             {
                 Entity tracker = crimeTrackers[i];
@@ -244,25 +237,18 @@ namespace MoreDispatchMod.Systems
 
                 if (timedOut || targetGone || resolved)
                 {
-                    // Pure timeout (building still exists, AccidentSite still present):
-                    // apply per-window rate limit to avoid mass simultaneous AccidentSite removals.
-                    if (timedOut && !targetGone && !resolved)
-                    {
-                        if (crimeTimeoutBudget <= 0)
-                            continue; // defer to next 64-frame window
-                        crimeTimeoutBudget--;
-                    }
-
                     string reason = timedOut ? "timeout" : targetGone ? "targetGone" : "resolved";
                     Mod.Log.Info($"[ManualCleanup] Crime cleanup: tracker={tracker.Index} target={targetEntity.Index} " +
                         $"reason={reason} age={currentFrame - tag.m_CreationFrame}");
 
-                    // Destroying the event entity signals vanilla AccidentSiteSystem to remove
-                    // AccidentSite from the building safely on its next run (within 64 frames).
-                    // Do NOT call ecb.RemoveComponent<AccidentSite> — simultaneous structural
-                    // changes on many rendered buildings corrupt BatchUploadSystem GPU batches.
+                    // CRITICAL: Never destroy the event entity while AccidentSite may still be on
+                    // the building referencing it via m_Event. AccidentSiteSystem reads m_Event in a
+                    // burst job every 64 frames — if the entity is destroyed, it crashes (BatchUploadSystem).
+                    // Only destroy the event entity if the building itself is gone (orphaned entity).
+                    // In all other cases, let AccidentSiteSystem own the event entity lifecycle; it will
+                    // destroy the event entity when it removes AccidentSite naturally.
                     Entity eventEntity = tag.m_EventEntity;
-                    if (eventEntity != Entity.Null && EntityManager.Exists(eventEntity))
+                    if (targetGone && eventEntity != Entity.Null && EntityManager.Exists(eventEntity))
                     {
                         EntityManager.DestroyEntity(eventEntity);
                     }
