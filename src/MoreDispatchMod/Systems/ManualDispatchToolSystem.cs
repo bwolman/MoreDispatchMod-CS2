@@ -16,6 +16,7 @@ using MoreDispatchMod.Components;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Mathematics;
 
 namespace MoreDispatchMod.Systems
 {
@@ -27,6 +28,7 @@ namespace MoreDispatchMod.Systems
         public bool FireEnabled { get; set; }
         public bool EMSEnabled { get; set; }
         public bool CrimeEnabled { get; set; }
+        public bool AccidentEnabled { get; set; }
 
         private const uint REQUEST_GROUP_EMERGENCY = 4u;
         private const int CRIME_DISPATCH_CAP = 5;
@@ -40,6 +42,8 @@ namespace MoreDispatchMod.Systems
         private EntityQuery m_EMSDispatchedQuery;
         private EntityQuery m_CrimeDispatchedQuery;
         private EntityQuery m_CrimePrefabQuery;
+        private EntityQuery m_AccidentDispatchedQuery;
+        private EntityQuery m_TrafficAccidentPrefabQuery;
         private Entity m_PreviousRaycastEntity;
 
         public override PrefabBase GetPrefab()
@@ -88,6 +92,13 @@ namespace MoreDispatchMod.Systems
                 ComponentType.ReadOnly<CrimeData>(),
                 ComponentType.ReadOnly<PrefabData>());
 
+            m_AccidentDispatchedQuery = GetEntityQuery(
+                ComponentType.ReadOnly<ManualAccidentDispatched>());
+
+            m_TrafficAccidentPrefabQuery = GetEntityQuery(
+                ComponentType.ReadOnly<TrafficAccidentData>(),
+                ComponentType.ReadOnly<PrefabData>());
+
             Mod.Log.Info("[ManualDispatchTool] OnCreate complete");
         }
 
@@ -96,7 +107,7 @@ namespace MoreDispatchMod.Systems
             base.OnStartRunning();
             applyAction.shouldBeEnabled = true;
             m_PreviousRaycastEntity = Entity.Null;
-            Mod.Log.Info($"[ManualDispatchTool] OnStartRunning — police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled} crime={CrimeEnabled}");
+            Mod.Log.Info($"[ManualDispatchTool] OnStartRunning — police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled} crime={CrimeEnabled} accident={AccidentEnabled}");
         }
 
         protected override void OnStopRunning()
@@ -153,7 +164,7 @@ namespace MoreDispatchMod.Systems
                 bool isVehicle = EntityManager.HasComponent<Vehicle>(hitEntity);
 
                 Mod.Log.Info($"[ManualDispatch] Click entity={hitEntity.Index} building={isBuilding} vehicle={isVehicle} " +
-                    $"police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled} crime={CrimeEnabled}");
+                    $"police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled} crime={CrimeEnabled} accident={AccidentEnabled}");
 
                 if (PoliceEnabled && (isBuilding || isVehicle))
                 {
@@ -173,6 +184,11 @@ namespace MoreDispatchMod.Systems
                 if (CrimeEnabled && isBuilding)
                 {
                     CreateCrimeDispatch(hitEntity);
+                }
+
+                if (AccidentEnabled && isVehicle)
+                {
+                    CreateAccidentDispatch(hitEntity);
                 }
             }
 
@@ -455,6 +471,82 @@ namespace MoreDispatchMod.Systems
             });
 
             Mod.Log.Info($"[ManualDispatch] Crime tracker created for building {buildingEntity.Index} (tracker={tracker.Index})");
+        }
+
+        private void CreateAccidentDispatch(Entity vehicleEntity)
+        {
+            uint currentFrame = m_SimulationSystem.frameIndex;
+
+            // Guard: vehicle already in an accident
+            if (EntityManager.HasComponent<InvolvedInAccident>(vehicleEntity))
+            {
+                Mod.Log.Info($"[ManualDispatch] Vehicle {vehicleEntity.Index} already in accident, skipping");
+                return;
+            }
+
+            // Guard: already tracked by our mod
+            var trackers = m_AccidentDispatchedQuery.ToEntityArray(Allocator.Temp);
+            bool alreadyTracked = false;
+            for (int i = 0; i < trackers.Length; i++)
+            {
+                ManualAccidentDispatched t = EntityManager.GetComponentData<ManualAccidentDispatched>(trackers[i]);
+                if (t.m_VehicleEntity == vehicleEntity) { alreadyTracked = true; break; }
+            }
+            trackers.Dispose();
+            if (alreadyTracked)
+            {
+                Mod.Log.Info($"[ManualDispatch] Accident already tracked for vehicle {vehicleEntity.Index}, skipping");
+                return;
+            }
+
+            // Find a traffic accident prefab for PrefabRef on the event entity
+            Entity accidentPrefab = Entity.Null;
+            var prefabs = m_TrafficAccidentPrefabQuery.ToEntityArray(Allocator.Temp);
+            if (prefabs.Length > 0) accidentPrefab = prefabs[0];
+            else Mod.Log.Warn("[ManualDispatch] No TrafficAccidentData prefab found — event entity will lack PrefabRef");
+            prefabs.Dispose();
+
+            // Compute lateral push perpendicular to vehicle's forward direction
+            Transform vehicleTransform = EntityManager.GetComponentData<Transform>(vehicleEntity);
+            float3 forward = math.mul(vehicleTransform.m_Rotation, new float3(0f, 0f, 1f));
+            float3 right = math.normalize(math.cross(forward, new float3(0f, 1f, 0f)));
+            float3 velocityDelta = right * 10f + new float3(0f, 1f, 0f);  // hard lateral + slight upward
+            float3 angularDelta = new float3(0f, 3f, 0f);                  // spin around Y axis
+
+            // Persistent accident event entity (Game.Events.Event — NOT Common.Event)
+            Entity eventEntity = EntityManager.CreateEntity();
+            EntityManager.AddComponentData<Game.Events.Event>(eventEntity, default);
+            EntityManager.AddComponentData<Game.Events.TrafficAccident>(eventEntity, default);
+            EntityManager.AddBuffer<TargetElement>(eventEntity);
+            EntityManager.AddComponentData<Created>(eventEntity, default);
+            EntityManager.AddComponentData<Updated>(eventEntity, default);
+            if (accidentPrefab != Entity.Null)
+                EntityManager.AddComponentData(eventEntity, new PrefabRef(accidentPrefab));
+
+            // Impact command entity (Game.Common.Event — consumed by ImpactSystem next frame)
+            Entity impactCmd = EntityManager.CreateEntity();
+            EntityManager.AddComponentData<Game.Common.Event>(impactCmd, default);
+            EntityManager.AddComponentData(impactCmd, new Impact
+            {
+                m_Event = eventEntity,
+                m_Target = vehicleEntity,
+                m_VelocityDelta = velocityDelta,
+                m_AngularVelocityDelta = angularDelta,
+                m_Severity = 10f,
+                m_CheckStoppedEvent = false
+            });
+
+            // Non-rendered tracker entity
+            Entity tracker = EntityManager.CreateEntity();
+            EntityManager.AddComponentData(tracker, new ManualAccidentDispatched
+            {
+                m_CreationFrame = currentFrame,
+                m_VehicleEntity = vehicleEntity,
+                m_EventEntity = eventEntity
+            });
+
+            Mod.Log.Info($"[ManualDispatch] Accident triggered on vehicle {vehicleEntity.Index} " +
+                $"(tracker={tracker.Index} event={eventEntity.Index} impact={impactCmd.Index})");
         }
     }
 }

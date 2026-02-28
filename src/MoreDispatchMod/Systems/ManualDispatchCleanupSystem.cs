@@ -16,11 +16,13 @@ namespace MoreDispatchMod.Systems
     public partial class ManualDispatchCleanupSystem : GameSystemBase
     {
         private const uint TIMEOUT_FRAMES = 1800; // ~30 seconds at 60 fps
+        private const uint ACCIDENT_TIMEOUT_FRAMES = 18000; // ~5 min — exceeds 14400-frame AccidentSite cleanup window
 
         private EntityQuery m_PoliceTrackerQuery;
         private EntityQuery m_FireTrackerQuery;
         private EntityQuery m_EMSTrackerQuery;
         private EntityQuery m_CrimeTrackerQuery;
+        private EntityQuery m_AccidentTrackerQuery;
         private EndFrameBarrier m_EndFrameBarrier;
         private SimulationSystem m_SimulationSystem;
         private int m_LogCounter;
@@ -44,6 +46,9 @@ namespace MoreDispatchMod.Systems
 
             m_CrimeTrackerQuery = GetEntityQuery(
                 ComponentType.ReadOnly<ManualCrimeDispatched>());
+
+            m_AccidentTrackerQuery = GetEntityQuery(
+                ComponentType.ReadOnly<ManualAccidentDispatched>());
         }
 
         protected override void OnUpdate()
@@ -52,7 +57,8 @@ namespace MoreDispatchMod.Systems
             if (m_PoliceTrackerQuery.IsEmptyIgnoreFilter
                 && m_FireTrackerQuery.IsEmptyIgnoreFilter
                 && m_EMSTrackerQuery.IsEmptyIgnoreFilter
-                && m_CrimeTrackerQuery.IsEmptyIgnoreFilter)
+                && m_CrimeTrackerQuery.IsEmptyIgnoreFilter
+                && m_AccidentTrackerQuery.IsEmptyIgnoreFilter)
             {
                 return;
             }
@@ -72,6 +78,7 @@ namespace MoreDispatchMod.Systems
             int fireCleaned = 0;
             int emsCleaned = 0;
             int crimeCleaned = 0;
+            int accidentCleaned = 0;
 
             // =====================================================================
             // APPLY PHASE — add deferred structural changes to rendered entities.
@@ -259,10 +266,41 @@ namespace MoreDispatchMod.Systems
             }
             crimeTrackers.Dispose();
 
+            // --- Accident cleanup ---
+            var accidentTrackers = m_AccidentTrackerQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < accidentTrackers.Length; i++)
+            {
+                Entity tracker = accidentTrackers[i];
+                ManualAccidentDispatched tag = EntityManager.GetComponentData<ManualAccidentDispatched>(tracker);
+                Entity vehicle = tag.m_VehicleEntity;
+
+                bool timedOut = (currentFrame - tag.m_CreationFrame) > ACCIDENT_TIMEOUT_FRAMES;
+                bool vehicleGone = vehicle == Entity.Null || !EntityManager.Exists(vehicle);
+                // Grace period: InvolvedInAccident is added by ImpactSystem next frame — avoid false resolution
+                bool resolved = !vehicleGone
+                    && !EntityManager.HasComponent<InvolvedInAccident>(vehicle)
+                    && (currentFrame - tag.m_CreationFrame) > 2;
+
+                if (timedOut || vehicleGone || resolved)
+                {
+                    string reason = timedOut ? "timeout" : vehicleGone ? "vehicleGone" : "resolved";
+                    Mod.Log.Info($"[ManualCleanup] Accident cleanup: tracker={tracker.Index} " +
+                        $"vehicle={vehicle.Index} reason={reason} age={currentFrame - tag.m_CreationFrame}");
+
+                    Entity eventEntity = tag.m_EventEntity;
+                    if (eventEntity != Entity.Null && EntityManager.Exists(eventEntity))
+                        EntityManager.DestroyEntity(eventEntity);
+
+                    EntityManager.DestroyEntity(tracker);
+                    accidentCleaned++;
+                }
+            }
+            accidentTrackers.Dispose();
+
             if (shouldLog)
             {
                 Mod.Log.Info($"[ManualCleanup] Applied: fire={fireApplied} | " +
-                    $"Cleaned: police={policeCleaned} fire={fireCleaned} ems={emsCleaned} crime={crimeCleaned}");
+                    $"Cleaned: police={policeCleaned} fire={fireCleaned} ems={emsCleaned} crime={crimeCleaned} accident={accidentCleaned}");
             }
         }
     }

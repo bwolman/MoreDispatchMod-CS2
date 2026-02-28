@@ -6,10 +6,12 @@ import {
     fireEnabled$,
     emsEnabled$,
     crimeEnabled$,
+    accidentEnabled$,
     togglePolice,
     toggleFire,
     toggleEMS,
     toggleCrime,
+    toggleAccident,
 } from "./bindings";
 import styles from "./DispatchPanel.module.scss";
 
@@ -19,6 +21,7 @@ export const DispatchPanel = () => {
     const fireOn = useValue(fireEnabled$);
     const emsOn = useValue(emsEnabled$);
     const crimeOn = useValue(crimeEnabled$);
+    const accidentOn = useValue(accidentEnabled$);
 
     if (!visible) return null;
 
@@ -62,6 +65,15 @@ export const DispatchPanel = () => {
                     >
                         <img src="coui://uil/Standard/Crime.svg" className={styles.optionIcon} alt="Crime" />
                         <span>Crime</span>
+                    </Button>
+                    <Button
+                        variant="flat"
+                        className={`${styles.option} ${accidentOn ? styles.active : ""}`}
+                        selected={accidentOn}
+                        onSelect={toggleAccident}
+                    >
+                        <img src="coui://uil/Standard/Car.svg" className={styles.optionIcon} alt="Accident" />
+                        <span>Accident</span>
                     </Button>
                 </div>
             </div>

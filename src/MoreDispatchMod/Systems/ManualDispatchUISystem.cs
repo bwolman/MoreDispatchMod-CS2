@@ -23,6 +23,7 @@ namespace MoreDispatchMod.Systems
         private ValueBinding<bool> m_FireEnabled;
         private ValueBinding<bool> m_EMSEnabled;
         private ValueBinding<bool> m_CrimeEnabled;
+        private ValueBinding<bool> m_AccidentEnabled;
         private ValueBinding<bool> m_PanelVisible;
 
         protected override void OnCreate()
@@ -41,6 +42,7 @@ namespace MoreDispatchMod.Systems
             AddBinding(m_FireEnabled = new ValueBinding<bool>(kGroup, "FireEnabled", false));
             AddBinding(m_EMSEnabled = new ValueBinding<bool>(kGroup, "EMSEnabled", false));
             AddBinding(m_CrimeEnabled = new ValueBinding<bool>(kGroup, "CrimeEnabled", false));
+            AddBinding(m_AccidentEnabled = new ValueBinding<bool>(kGroup, "AccidentEnabled", false));
             AddBinding(m_PanelVisible = new ValueBinding<bool>(kGroup, "PanelVisible", false));
 
             // Trigger bindings (JS → C#)
@@ -49,8 +51,9 @@ namespace MoreDispatchMod.Systems
             AddBinding(new TriggerBinding(kGroup, "ToggleFire", HandleToggleFire));
             AddBinding(new TriggerBinding(kGroup, "ToggleEMS", HandleToggleEMS));
             AddBinding(new TriggerBinding(kGroup, "ToggleCrime", HandleToggleCrime));
+            AddBinding(new TriggerBinding(kGroup, "ToggleAccident", HandleToggleAccident));
 
-            Mod.Log.Info("[ManualDispatchUI] Bindings registered: IsToolActive, PoliceEnabled, FireEnabled, EMSEnabled, CrimeEnabled, PanelVisible, ToggleTool, TogglePolice, ToggleFire, ToggleEMS, ToggleCrime");
+            Mod.Log.Info("[ManualDispatchUI] Bindings registered: IsToolActive, PoliceEnabled, FireEnabled, EMSEnabled, CrimeEnabled, AccidentEnabled, PanelVisible, ToggleTool, TogglePolice, ToggleFire, ToggleEMS, ToggleCrime, ToggleAccident");
 
             // Track external tool changes (Escape key, other tool selected)
             m_ToolSystem.EventToolChanged += OnToolChanged;
@@ -104,9 +107,17 @@ namespace MoreDispatchMod.Systems
             DeactivateIfNoneEnabled();
         }
 
+        private void HandleToggleAccident()
+        {
+            m_DispatchTool.AccidentEnabled = !m_DispatchTool.AccidentEnabled;
+            m_AccidentEnabled.Update(m_DispatchTool.AccidentEnabled);
+            Mod.Log.Info($"[ManualDispatchUI] HandleToggleAccident → {m_DispatchTool.AccidentEnabled}");
+            DeactivateIfNoneEnabled();
+        }
+
         private void DeactivateIfNoneEnabled()
         {
-            if (!m_DispatchTool.PoliceEnabled && !m_DispatchTool.FireEnabled && !m_DispatchTool.EMSEnabled && !m_DispatchTool.CrimeEnabled)
+            if (!m_DispatchTool.PoliceEnabled && !m_DispatchTool.FireEnabled && !m_DispatchTool.EMSEnabled && !m_DispatchTool.CrimeEnabled && !m_DispatchTool.AccidentEnabled)
             {
                 if (m_ToolSystem.activeTool == m_DispatchTool)
                 {
@@ -129,10 +140,12 @@ namespace MoreDispatchMod.Systems
                 m_DispatchTool.FireEnabled = false;
                 m_DispatchTool.EMSEnabled = false;
                 m_DispatchTool.CrimeEnabled = false;
+                m_DispatchTool.AccidentEnabled = false;
                 m_PoliceEnabled.Update(false);
                 m_FireEnabled.Update(false);
                 m_EMSEnabled.Update(false);
                 m_CrimeEnabled.Update(false);
+                m_AccidentEnabled.Update(false);
                 Mod.Log.Info("[ManualDispatchUI] Tool deactivated, all toggles reset");
             }
         }

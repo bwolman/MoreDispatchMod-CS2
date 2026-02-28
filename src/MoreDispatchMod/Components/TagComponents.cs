@@ -66,6 +66,18 @@ namespace MoreDispatchMod.Components
     }
 
     /// <summary>
+    /// Tracker for manual accident dispatch. Lives on a separate non-rendered entity.
+    /// Holds a reference to the persistent accident event entity so we can clean it up
+    /// after the accident resolves.
+    /// </summary>
+    public struct ManualAccidentDispatched : IComponentData
+    {
+        public uint m_CreationFrame;
+        public Entity m_VehicleEntity;
+        public Entity m_EventEntity;  // persistent accident event — destroyed in cleanup
+    }
+
+    /// <summary>
     /// Marker added to a FireRescueRequest entity after we have issued a HandleRequest cancel for it.
     /// Prevents PreventHelicopterBuildingFireSystem from issuing a second cancel on the next frame
     /// before HandleRequestSystem has had a chance to destroy the request entity.
