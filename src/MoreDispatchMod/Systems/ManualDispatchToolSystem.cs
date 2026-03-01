@@ -31,7 +31,7 @@ namespace MoreDispatchMod.Systems
         public bool AccidentEnabled { get; set; }
 
         private const uint REQUEST_GROUP_EMERGENCY = 4u;
-        private const int CRIME_DISPATCH_CAP = 5;
+        private const int CRIME_DISPATCH_CAP = 30;
 
         private ToolOutputBarrier m_Barrier;
         private SimulationSystem m_SimulationSystem;
@@ -300,12 +300,13 @@ namespace MoreDispatchMod.Systems
 
             Mod.Log.Info($"[ManualDispatch] Fire: created request entity {request.Index}");
 
-            // Non-rendered tracker entity
+            // Non-rendered tracker entity — also stores the request entity so cleanup can destroy it
             Entity tracker = EntityManager.CreateEntity();
             EntityManager.AddComponentData(tracker, new ManualFireDispatched
             {
                 m_CreationFrame = currentFrame,
-                m_TargetEntity = entity
+                m_TargetEntity = entity,
+                m_RequestEntity = request
             });
 
             Mod.Log.Info($"[ManualDispatch] Fire dispatched to {entity.Index} (tracker={tracker.Index})");

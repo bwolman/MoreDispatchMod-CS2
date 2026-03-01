@@ -39,11 +39,14 @@ namespace MoreDispatchMod.Components
 
     /// <summary>
     /// Tracker for manual fire dispatch. Lives on a separate non-rendered entity.
+    /// m_RequestEntity is the FireRescueRequest we created; cleanup destroys it to prevent
+    /// stale requests from triggering repeat dispatches after RescueTarget is re-added via ECB.
     /// </summary>
     public struct ManualFireDispatched : IComponentData
     {
         public uint m_CreationFrame;
         public Entity m_TargetEntity;
+        public Entity m_RequestEntity;
     }
 
     /// <summary>

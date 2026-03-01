@@ -93,7 +93,10 @@ namespace MoreDispatchMod.Systems
             var policeTrackers = m_PoliceTrackerQuery.ToEntityArray(Allocator.Temp);
             // Don't dispose — reused in cleanup below
 
-            // --- Fire: add RescueTarget to building ---
+            // --- Fire: add RescueTarget to building (one-shot, first 3 frames only) ---
+            // IMPORTANT: Only add RescueTarget in the first few frames after tracker creation.
+            // Re-adding it every tick would keep stale FireRescueRequest entities alive and
+            // cause continuous fire engine dispatches after the first engine finishes its job.
             var fireTrackers = m_FireTrackerQuery.ToEntityArray(Allocator.Temp);
             for (int i = 0; i < fireTrackers.Length; i++)
             {
@@ -102,7 +105,8 @@ namespace MoreDispatchMod.Systems
                 Entity targetEntity = tag.m_TargetEntity;
 
                 if (targetEntity != Entity.Null && EntityManager.Exists(targetEntity)
-                    && !EntityManager.HasComponent<RescueTarget>(targetEntity))
+                    && !EntityManager.HasComponent<RescueTarget>(targetEntity)
+                    && (currentFrame - tag.m_CreationFrame) <= 3)
                 {
                     // Use ECB to defer RescueTarget add — structural change on rendered building
                     ecb.AddComponent(targetEntity, new RescueTarget(Entity.Null));
@@ -175,11 +179,11 @@ namespace MoreDispatchMod.Systems
                 bool timedOut = (currentFrame - tag.m_CreationFrame) > TIMEOUT_FRAMES;
                 bool targetGone = targetEntity == Entity.Null || !EntityManager.Exists(targetEntity);
                 // Grace period: RescueTarget is added via ECB (plays back at end of frame),
-                // so HasComponent returns false for 1-2 frames after creation. Avoid false
-                // "already resolved" detection until ECB has had time to play back.
+                // so HasComponent returns false for several frames after creation. Use 10-frame
+                // grace to ensure ECB has played back before treating missing RescueTarget as resolved.
                 bool alreadyResolved = !targetGone
                     && !EntityManager.HasComponent<RescueTarget>(targetEntity)
-                    && (currentFrame - tag.m_CreationFrame) > 1;
+                    && (currentFrame - tag.m_CreationFrame) > 10;
 
                 if (timedOut || targetGone || alreadyResolved)
                 {
@@ -188,6 +192,12 @@ namespace MoreDispatchMod.Systems
                         // Use ECB to defer RescueTarget removal — structural change on rendered building
                         ecb.RemoveComponent<RescueTarget>(targetEntity);
                     }
+
+                    // Destroy the FireRescueRequest entity we created to prevent stale requests
+                    // from triggering re-dispatch if RescueTarget gets re-added later (e.g., via ECB ghost).
+                    Entity requestEntity = tag.m_RequestEntity;
+                    if (requestEntity != Entity.Null && EntityManager.Exists(requestEntity))
+                        EntityManager.DestroyEntity(requestEntity);
 
                     EntityManager.DestroyEntity(tracker);
                     fireCleaned++;
