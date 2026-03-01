@@ -73,6 +73,9 @@ namespace MoreDispatchMod
                 { $"Options.OPTION[{id}.{name}.AllowMultiplePolicePerBuilding]", "Allow Multiple Police per Building" },
                 { $"Options.OPTION_DESCRIPTION[{id}.{name}.AllowMultiplePolicePerBuilding]", "When using the manual dispatch tool, each police click sends a new car even if one is already on the way." },
 
+                { $"Options.OPTION[{id}.{name}.AreaCrimeRadius]", "Area Crime Radius (meters)" },
+                { $"Options.OPTION_DESCRIPTION[{id}.{name}.AreaCrimeRadius]", "Radius in meters for the Area Crime manual dispatch tool. All buildings within this distance of the clicked building will receive a crime dispatch." },
+
                 { $"Options.OPTION[{id}.{name}.ResetSettings]", "Reset to Defaults" },
                 { $"Options.WARNING[{id}.{name}.ResetSettings]", "Are you sure you want to reset all More Dispatch Mod settings to their default values?" },
             };

@@ -29,9 +29,11 @@ namespace MoreDispatchMod.Systems
         public bool EMSEnabled { get; set; }
         public bool CrimeEnabled { get; set; }
         public bool AccidentEnabled { get; set; }
+        public bool AreaCrimeEnabled { get; set; }
 
         private const uint REQUEST_GROUP_EMERGENCY = 4u;
-        private const int CRIME_DISPATCH_CAP = 30;
+        private const int CRIME_DISPATCH_CAP = 50;
+        private const int MAX_AREA_CRIME_PER_CLICK = 50;
 
         private ToolOutputBarrier m_Barrier;
         private SimulationSystem m_SimulationSystem;
@@ -44,6 +46,7 @@ namespace MoreDispatchMod.Systems
         private EntityQuery m_CrimePrefabQuery;
         private EntityQuery m_AccidentDispatchedQuery;
         private EntityQuery m_TrafficAccidentPrefabQuery;
+        private EntityQuery m_AllBuildingsQuery;
         private Entity m_PreviousRaycastEntity;
 
         public override PrefabBase GetPrefab()
@@ -99,6 +102,12 @@ namespace MoreDispatchMod.Systems
                 ComponentType.ReadOnly<TrafficAccidentData>(),
                 ComponentType.ReadOnly<PrefabData>());
 
+            m_AllBuildingsQuery = GetEntityQuery(
+                ComponentType.ReadOnly<Building>(),
+                ComponentType.ReadOnly<Transform>(),
+                ComponentType.Exclude<Deleted>(),
+                ComponentType.Exclude<Temp>());
+
             Mod.Log.Info("[ManualDispatchTool] OnCreate complete");
         }
 
@@ -107,7 +116,7 @@ namespace MoreDispatchMod.Systems
             base.OnStartRunning();
             applyAction.shouldBeEnabled = true;
             m_PreviousRaycastEntity = Entity.Null;
-            Mod.Log.Info($"[ManualDispatchTool] OnStartRunning — police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled} crime={CrimeEnabled} accident={AccidentEnabled}");
+            Mod.Log.Info($"[ManualDispatchTool] OnStartRunning — police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled} crime={CrimeEnabled} accident={AccidentEnabled} areaCrime={AreaCrimeEnabled}");
         }
 
         protected override void OnStopRunning()
@@ -164,7 +173,7 @@ namespace MoreDispatchMod.Systems
                 bool isVehicle = EntityManager.HasComponent<Vehicle>(hitEntity);
 
                 Mod.Log.Info($"[ManualDispatch] Click entity={hitEntity.Index} building={isBuilding} vehicle={isVehicle} " +
-                    $"police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled} crime={CrimeEnabled} accident={AccidentEnabled}");
+                    $"police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled} crime={CrimeEnabled} accident={AccidentEnabled} areaCrime={AreaCrimeEnabled}");
 
                 if (PoliceEnabled && (isBuilding || isVehicle))
                 {
@@ -189,6 +198,11 @@ namespace MoreDispatchMod.Systems
                 if (AccidentEnabled && isVehicle)
                 {
                     CreateAccidentDispatch(hitEntity);
+                }
+
+                if (AreaCrimeEnabled && isBuilding)
+                {
+                    CreateAreaCrimeDispatch(hitEntity);
                 }
             }
 
@@ -548,6 +562,40 @@ namespace MoreDispatchMod.Systems
 
             Mod.Log.Info($"[ManualDispatch] Accident triggered on vehicle {vehicleEntity.Index} " +
                 $"(tracker={tracker.Index} event={eventEntity.Index} impact={impactCmd.Index})");
+        }
+
+        private void CreateAreaCrimeDispatch(Entity clickedBuilding)
+        {
+            if (!EntityManager.HasComponent<Transform>(clickedBuilding))
+            {
+                Mod.Log.Warn($"[ManualDispatch] AreaCrime: clicked building {clickedBuilding.Index} has no Transform, skipping");
+                return;
+            }
+
+            float radius = Mod.Settings.AreaCrimeRadius;
+            float radiusSq = radius * radius;
+            float3 center = EntityManager.GetComponentData<Transform>(clickedBuilding).m_Position;
+
+            var buildings = m_AllBuildingsQuery.ToEntityArray(Allocator.Temp);
+            int dispatched = 0;
+
+            for (int i = 0; i < buildings.Length; i++)
+            {
+                if (dispatched >= MAX_AREA_CRIME_PER_CLICK)
+                    break;
+
+                Entity building = buildings[i];
+                float3 pos = EntityManager.GetComponentData<Transform>(building).m_Position;
+                float2 delta = pos.xz - center.xz;
+                if (math.dot(delta, delta) > radiusSq)
+                    continue;
+
+                CreateCrimeDispatch(building);
+                dispatched++;
+            }
+
+            buildings.Dispose();
+            Mod.Log.Info($"[ManualDispatch] AreaCrime: attempted dispatch to {dispatched} buildings within {radius}m of {clickedBuilding.Index}");
         }
     }
 }
