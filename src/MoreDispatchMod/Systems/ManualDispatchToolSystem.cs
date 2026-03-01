@@ -37,6 +37,7 @@ namespace MoreDispatchMod.Systems
 
         private ToolOutputBarrier m_Barrier;
         private SimulationSystem m_SimulationSystem;
+        private OverlayRenderSystem m_OverlayRenderSystem;
         private EntityQuery m_HighlightedQuery;
         private EntityQuery m_CitizenQuery;
         private EntityQuery m_PoliceDispatchedQuery;
@@ -66,6 +67,7 @@ namespace MoreDispatchMod.Systems
 
             m_Barrier = World.GetOrCreateSystemManaged<ToolOutputBarrier>();
             m_SimulationSystem = World.GetOrCreateSystemManaged<SimulationSystem>();
+            m_OverlayRenderSystem = World.GetOrCreateSystemManaged<OverlayRenderSystem>();
 
             m_HighlightedQuery = GetEntityQuery(
                 ComponentType.ReadOnly<Highlighted>(),
@@ -204,6 +206,29 @@ namespace MoreDispatchMod.Systems
                 {
                     CreateAreaCrimeDispatch(hitEntity);
                 }
+            }
+
+            // --- Area Crime radius overlay ---
+            // Draw a projected circle on the terrain showing the dispatch radius.
+            if (AreaCrimeEnabled && raycastHit && hitEntity != Entity.Null
+                && EntityManager.HasComponent<Building>(hitEntity)
+                && EntityManager.HasComponent<Transform>(hitEntity))
+            {
+                OverlayRenderSystem.Buffer overlayBuffer = m_OverlayRenderSystem.GetBuffer(out JobHandle overlayDeps);
+                inputDeps = JobHandle.CombineDependencies(inputDeps, overlayDeps);
+
+                float3 center = EntityManager.GetComponentData<Transform>(hitEntity).m_Position;
+                float diameter = Mod.Settings.AreaCrimeRadius * 2f;
+
+                overlayBuffer.DrawCircle(
+                    new UnityEngine.Color(0.8f, 0.1f, 0.1f, 0.8f),     // outline: dark red
+                    new UnityEngine.Color(0.8f, 0.1f, 0.1f, 0.1f),     // fill: very light red
+                    1.5f,                                                 // outline width (meters)
+                    OverlayRenderSystem.StyleFlags.Projected,
+                    new float2(0f, 1f),                                   // direction (north)
+                    center,
+                    diameter
+                );
             }
 
             return inputDeps;
