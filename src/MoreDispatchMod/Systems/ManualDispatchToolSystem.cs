@@ -100,9 +100,12 @@ namespace MoreDispatchMod.Systems
             m_AccidentDispatchedQuery = GetEntityQuery(
                 ComponentType.ReadOnly<ManualAccidentDispatched>());
 
+            // EventData (not PrefabData) uniquely identifies event-type prefab entities.
+            // The prefab entity must carry TrafficAccidentData, FireData, CrimeData,
+            // and EventData — downstream systems look up fire/chain-reaction data via PrefabRef.
             m_TrafficAccidentPrefabQuery = GetEntityQuery(
                 ComponentType.ReadOnly<TrafficAccidentData>(),
-                ComponentType.ReadOnly<PrefabData>());
+                ComponentType.ReadOnly<EventData>());
 
             m_AllBuildingsQuery = GetEntityQuery(
                 ComponentType.ReadOnly<Building>(),
@@ -553,7 +556,14 @@ namespace MoreDispatchMod.Systems
             float3 velocityDelta = right * 10f + new float3(0f, 1f, 0f);  // hard lateral + slight upward
             float3 angularDelta = new float3(0f, 3f, 0f);                  // spin around Y axis
 
-            // Persistent accident event entity (Game.Events.Event — NOT Common.Event)
+            // Persistent accident event entity (Game.Events.Event — NOT Common.Event).
+            // All 6 components are added synchronously via direct EntityManager calls so
+            // the entity is fully formed before any downstream system runs.
+            // Note: EntityManager.CreateArchetype() and CreateEntity(EntityArchetype) trigger
+            // ReadOnlySpan<> compile errors on netstandard2.1 in this Unity.Entities version,
+            // so we use sequential AddComponentData/AddBuffer instead. These are main-thread
+            // synchronous calls — the TargetElement buffer exists before AccidentVehicleSystem
+            // (64-frame cycle) or AccidentSiteSystem runs. HasBuffer checks will return true.
             Entity eventEntity = EntityManager.CreateEntity();
             EntityManager.AddComponentData<Game.Events.Event>(eventEntity, default);
             EntityManager.AddComponentData<Game.Events.TrafficAccident>(eventEntity, default);

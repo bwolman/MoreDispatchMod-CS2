@@ -5,6 +5,7 @@ using Game.Common;
 using Game.Events;
 using Game.Simulation;
 using Game.Tools;
+using Game.Vehicles;
 
 using MoreDispatchMod.Components;
 
@@ -291,14 +292,37 @@ namespace MoreDispatchMod.Systems
                     && !EntityManager.HasComponent<InvolvedInAccident>(vehicle)
                     && (currentFrame - tag.m_CreationFrame) > 2;
 
+                // Periodic diagnostic: log vehicle state for active accident trackers
+                if (shouldLog && !vehicleGone && !timedOut)
+                {
+                    uint age = currentFrame - tag.m_CreationFrame;
+                    bool hasInvolved = EntityManager.HasComponent<InvolvedInAccident>(vehicle);
+                    bool hasOutOfControl = EntityManager.HasComponent<Game.Vehicles.OutOfControl>(vehicle);
+                    string involvedEvent = "none";
+                    if (hasInvolved)
+                    {
+                        InvolvedInAccident inv = EntityManager.GetComponentData<InvolvedInAccident>(vehicle);
+                        bool hasTargetBuf = EntityManager.HasBuffer<TargetElement>(inv.m_Event);
+                        involvedEvent = $"evt={inv.m_Event.Index} sev={inv.m_Severity} buf={hasTargetBuf}";
+                    }
+                    Mod.Log.Info($"[ManualCleanup] DIAG accident tracker={tracker.Index} vehicle={vehicle.Index} " +
+                        $"age={age} involved={hasInvolved}({involvedEvent}) outOfControl={hasOutOfControl}");
+                }
+
                 if (timedOut || vehicleGone || resolved)
                 {
                     string reason = timedOut ? "timeout" : vehicleGone ? "vehicleGone" : "resolved";
                     Mod.Log.Info($"[ManualCleanup] Accident cleanup: tracker={tracker.Index} " +
                         $"vehicle={vehicle.Index} reason={reason} age={currentFrame - tag.m_CreationFrame}");
 
+                    // CRITICAL: Only destroy the event entity on timeout.
+                    // AccidentSiteSystem (Burst job, every 64 frames) reads m_Event on the AccidentSite
+                    // road-edge entity for up to 14400 frames after the site is created. Destroying the
+                    // event entity while AccidentSite still references it crashes BatchUploadSystem.
+                    // Our 18000-frame timeout safely outlasts the 14400-frame AccidentSite cleanup window.
+                    // For vehicleGone/resolved cases, let AccidentSiteSystem own the event lifecycle.
                     Entity eventEntity = tag.m_EventEntity;
-                    if (eventEntity != Entity.Null && EntityManager.Exists(eventEntity))
+                    if (timedOut && eventEntity != Entity.Null && EntityManager.Exists(eventEntity))
                         EntityManager.DestroyEntity(eventEntity);
 
                     EntityManager.DestroyEntity(tracker);
