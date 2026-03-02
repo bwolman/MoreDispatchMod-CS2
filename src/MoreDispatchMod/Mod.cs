@@ -42,6 +42,7 @@ namespace MoreDispatchMod
                 updateSystem.UpdateAt<ManualDispatchCleanupSystem>(SystemUpdatePhase.GameSimulation);
                 updateSystem.UpdateAt<ManualDispatchToolSystem>(SystemUpdatePhase.ToolUpdate);
                 updateSystem.UpdateAt<ManualDispatchUISystem>(SystemUpdatePhase.UIUpdate);
+                updateSystem.UpdateAt<FireEscalationRateFixSystem>(SystemUpdatePhase.GameSimulation);
             }
             catch (Exception ex)
             {
