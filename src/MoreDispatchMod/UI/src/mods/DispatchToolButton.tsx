@@ -9,6 +9,7 @@ import {
     crimeEnabled$,
     accidentEnabled$,
     areaCrimeEnabled$,
+    taxiRerouteEnabled$,
     toggleTool,
     togglePolice,
     toggleFire,
@@ -16,6 +17,7 @@ import {
     toggleCrime,
     toggleAccident,
     toggleAreaCrime,
+    toggleTaxiReroute,
 } from "./bindings";
 import styles from "./DispatchToolButton.module.scss";
 
@@ -28,6 +30,7 @@ export const DispatchToolButton = () => {
     const crimeOn = useValue(crimeEnabled$);
     const accidentOn = useValue(accidentEnabled$);
     const areaCrimeOn = useValue(areaCrimeEnabled$);
+    const taxiRerouteOn = useValue(taxiRerouteEnabled$);
 
     return (
         <>
@@ -102,6 +105,15 @@ export const DispatchToolButton = () => {
                         >
                             <img src="coui://uil/Standard/Crime.svg" className={styles.optionIcon} />
                             <span>Area Crime</span>
+                        </Button>
+                        <Button
+                            variant="flat"
+                            className={`${styles.option} ${taxiRerouteOn ? styles.active : ""}`}
+                            selected={taxiRerouteOn}
+                            onSelect={toggleTaxiReroute}
+                        >
+                            <img src="coui://uil/Standard/Car.svg" className={styles.optionIcon} />
+                            <span>Taxi Reroute</span>
                         </Button>
                     </div>
                 </div>
