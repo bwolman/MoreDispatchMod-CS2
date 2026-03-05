@@ -670,7 +670,7 @@ namespace MoreDispatchMod.Systems
 
         private bool IsTaxiVehicle(Entity entity)
         {
-            if (!EntityManager.HasComponent<PublicTransport>(entity)) return false;
+            if (!EntityManager.HasComponent<Game.Vehicles.PublicTransport>(entity)) return false;
             if (!EntityManager.HasComponent<PrefabRef>(entity)) return false;
             PrefabRef prefabRef = EntityManager.GetComponentData<PrefabRef>(entity);
             if (!EntityManager.HasComponent<PublicTransportVehicleData>(prefabRef.m_Prefab)) return false;
@@ -690,7 +690,7 @@ namespace MoreDispatchMod.Systems
             if (EntityManager.HasComponent<Target>(taxiEntity))
             {
                 Target target = EntityManager.GetComponentData<Target>(taxiEntity);
-                target.m_Entity = destinationBuilding;
+                target.m_Target = destinationBuilding;
                 EntityManager.SetComponentData(taxiEntity, target);
             }
 
@@ -703,9 +703,9 @@ namespace MoreDispatchMod.Systems
             }
 
             // Clear current dispatch request so TransportCarAISystem doesn't immediately override
-            if (EntityManager.HasComponent<PublicTransport>(taxiEntity))
+            if (EntityManager.HasComponent<Game.Vehicles.PublicTransport>(taxiEntity))
             {
-                PublicTransport pt = EntityManager.GetComponentData<PublicTransport>(taxiEntity);
+                Game.Vehicles.PublicTransport pt = EntityManager.GetComponentData<Game.Vehicles.PublicTransport>(taxiEntity);
                 pt.m_TargetRequest = Entity.Null;
                 EntityManager.SetComponentData(taxiEntity, pt);
             }
