@@ -670,20 +670,7 @@ namespace MoreDispatchMod.Systems
 
         private bool IsTaxiVehicle(Entity entity)
         {
-            if (!EntityManager.HasComponent<PrefabRef>(entity))
-            {
-                Mod.Log.Info($"[TaxiReroute] Vehicle {entity.Index}: no PrefabRef");
-                return false;
-            }
-            PrefabRef prefabRef = EntityManager.GetComponentData<PrefabRef>(entity);
-            if (!EntityManager.HasComponent<PublicTransportVehicleData>(prefabRef.m_Prefab))
-            {
-                Mod.Log.Info($"[TaxiReroute] Vehicle {entity.Index}: prefab {prefabRef.m_Prefab.Index} has no PublicTransportVehicleData");
-                return false;
-            }
-            PublicTransportVehicleData vtd = EntityManager.GetComponentData<PublicTransportVehicleData>(prefabRef.m_Prefab);
-            Mod.Log.Info($"[TaxiReroute] Vehicle {entity.Index}: m_TransportType={vtd.m_TransportType}");
-            return vtd.m_TransportType == TransportType.Taxi;
+            return EntityManager.HasComponent<Game.Vehicles.Taxi>(entity);
         }
 
         private void RerouteTaxi(Entity taxiEntity, Entity destinationBuilding)
