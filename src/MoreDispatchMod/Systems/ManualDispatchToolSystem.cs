@@ -681,6 +681,17 @@ namespace MoreDispatchMod.Systems
                 return;
             }
 
+            // Log taxi state before making changes
+            if (EntityManager.HasComponent<Game.Vehicles.Taxi>(taxiEntity))
+            {
+                Game.Vehicles.Taxi taxiComp = EntityManager.GetComponentData<Game.Vehicles.Taxi>(taxiEntity);
+                Mod.Log.Info($"[TaxiReroute] Taxi {taxiEntity.Index} state before reroute: flags={taxiComp.m_State} targetRequest={taxiComp.m_TargetRequest.Index}");
+
+                // Clear the active dispatch request so TaxiAISystem doesn't override our Target
+                taxiComp.m_TargetRequest = Entity.Null;
+                EntityManager.SetComponentData(taxiEntity, taxiComp);
+            }
+
             // Change destination target
             if (EntityManager.HasComponent<Target>(taxiEntity))
             {
@@ -695,14 +706,6 @@ namespace MoreDispatchMod.Systems
                 PathOwner pathOwner = EntityManager.GetComponentData<PathOwner>(taxiEntity);
                 pathOwner.m_State |= PathFlags.Obsolete;
                 EntityManager.SetComponentData(taxiEntity, pathOwner);
-            }
-
-            // Clear current dispatch request so TransportCarAISystem doesn't immediately override
-            if (EntityManager.HasComponent<Game.Vehicles.PublicTransport>(taxiEntity))
-            {
-                Game.Vehicles.PublicTransport pt = EntityManager.GetComponentData<Game.Vehicles.PublicTransport>(taxiEntity);
-                pt.m_TargetRequest = Entity.Null;
-                EntityManager.SetComponentData(taxiEntity, pt);
             }
 
             Mod.Log.Info($"[TaxiReroute] Rerouted taxi {taxiEntity.Index} → building {destinationBuilding.Index}");
