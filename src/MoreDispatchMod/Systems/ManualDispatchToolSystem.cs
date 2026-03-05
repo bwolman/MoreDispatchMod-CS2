@@ -5,8 +5,10 @@ using Game.Common;
 using Game.Events;
 using Game.Input;
 using Game.Objects;
+using Game.Pathfind;
 using Game.Prefabs;
 using Game.Rendering;
+using Game.Routes;
 using Game.Simulation;
 using Game.Tools;
 using Game.Vehicles;
@@ -30,6 +32,11 @@ namespace MoreDispatchMod.Systems
         public bool CrimeEnabled { get; set; }
         public bool AccidentEnabled { get; set; }
         public bool AreaCrimeEnabled { get; set; }
+        public bool TaxiRerouteEnabled { get; set; }
+
+        // Taxi reroute two-click state
+        private Entity m_SelectedTaxi = Entity.Null;
+        private bool m_AwaitingDestination;
 
         private const uint REQUEST_GROUP_EMERGENCY = 4u;
         private const int CRIME_DISPATCH_CAP = 50;
@@ -121,6 +128,8 @@ namespace MoreDispatchMod.Systems
             base.OnStartRunning();
             applyAction.shouldBeEnabled = true;
             m_PreviousRaycastEntity = Entity.Null;
+            m_SelectedTaxi = Entity.Null;
+            m_AwaitingDestination = false;
             Mod.Log.Info($"[ManualDispatchTool] OnStartRunning — police={PoliceEnabled} fire={FireEnabled} ems={EMSEnabled} crime={CrimeEnabled} accident={AccidentEnabled} areaCrime={AreaCrimeEnabled}");
         }
 
@@ -135,6 +144,16 @@ namespace MoreDispatchMod.Systems
                 EntityManager.AddComponent<BatchesUpdated>(m_HighlightedQuery);
                 EntityManager.RemoveComponent<Highlighted>(m_HighlightedQuery);
             }
+
+            // Also clear any persistent selected-taxi highlight (query may have already removed it,
+            // but do an explicit check in case the entity was just added this frame)
+            if (m_SelectedTaxi != Entity.Null && EntityManager.HasComponent<Highlighted>(m_SelectedTaxi))
+            {
+                EntityManager.AddComponent<BatchesUpdated>(m_SelectedTaxi);
+                EntityManager.RemoveComponent<Highlighted>(m_SelectedTaxi);
+            }
+            m_SelectedTaxi = Entity.Null;
+            m_AwaitingDestination = false;
 
             m_PreviousRaycastEntity = Entity.Null;
         }
@@ -155,8 +174,15 @@ namespace MoreDispatchMod.Systems
 
             if (!m_HighlightedQuery.IsEmptyIgnoreFilter && hitEntity != m_PreviousRaycastEntity)
             {
-                ecb.AddComponent<BatchesUpdated>(m_HighlightedQuery, EntityQueryCaptureMode.AtPlayback);
-                ecb.RemoveComponent<Highlighted>(m_HighlightedQuery, EntityQueryCaptureMode.AtPlayback);
+                // Clear hover highlights but preserve the selected taxi's persistent highlight
+                var highlighted = m_HighlightedQuery.ToEntityArray(Allocator.Temp);
+                for (int i = 0; i < highlighted.Length; i++)
+                {
+                    if (m_SelectedTaxi != Entity.Null && highlighted[i] == m_SelectedTaxi) continue;
+                    ecb.AddComponent<BatchesUpdated>(highlighted[i]);
+                    ecb.RemoveComponent<Highlighted>(highlighted[i]);
+                }
+                highlighted.Dispose();
                 m_PreviousRaycastEntity = Entity.Null;
             }
 
@@ -208,6 +234,49 @@ namespace MoreDispatchMod.Systems
                 if (AreaCrimeEnabled && isBuilding)
                 {
                     CreateAreaCrimeDispatch(hitEntity);
+                }
+            }
+
+            // --- Taxi Reroute (two-click: select taxi, then click building) ---
+            if (TaxiRerouteEnabled)
+            {
+                if (!m_AwaitingDestination)
+                {
+                    // State 1: user clicks a taxi
+                    if (raycastHit && hitEntity != Entity.Null
+                        && applyAction.WasReleasedThisFrame()
+                        && EntityManager.HasComponent<Vehicle>(hitEntity)
+                        && IsTaxiVehicle(hitEntity))
+                    {
+                        ecb.AddComponent<Highlighted>(hitEntity);
+                        ecb.AddComponent<BatchesUpdated>(hitEntity);
+                        m_SelectedTaxi = hitEntity;
+                        m_AwaitingDestination = true;
+                        Mod.Log.Info($"[TaxiReroute] Taxi selected: {hitEntity.Index} — click a building to reroute");
+                    }
+                }
+                else
+                {
+                    // State 2: user clicks a building to reroute to
+                    if (raycastHit && hitEntity != Entity.Null
+                        && applyAction.WasReleasedThisFrame()
+                        && EntityManager.HasComponent<Building>(hitEntity))
+                    {
+                        RerouteTaxi(m_SelectedTaxi, hitEntity);
+                        ecb.AddComponent<BatchesUpdated>(m_SelectedTaxi);
+                        ecb.RemoveComponent<Highlighted>(m_SelectedTaxi);
+                        m_SelectedTaxi = Entity.Null;
+                        m_AwaitingDestination = false;
+                    }
+                    else if (applyAction.WasReleasedThisFrame() && (!raycastHit || hitEntity == Entity.Null))
+                    {
+                        // Clicked empty space — cancel selection
+                        ecb.AddComponent<BatchesUpdated>(m_SelectedTaxi);
+                        ecb.RemoveComponent<Highlighted>(m_SelectedTaxi);
+                        m_SelectedTaxi = Entity.Null;
+                        m_AwaitingDestination = false;
+                        Mod.Log.Info("[TaxiReroute] Selection cancelled (empty click)");
+                    }
                 }
             }
 
@@ -597,6 +666,51 @@ namespace MoreDispatchMod.Systems
 
             Mod.Log.Info($"[ManualDispatch] Accident triggered on vehicle {vehicleEntity.Index} " +
                 $"(tracker={tracker.Index} event={eventEntity.Index} impact={impactCmd.Index})");
+        }
+
+        private bool IsTaxiVehicle(Entity entity)
+        {
+            if (!EntityManager.HasComponent<PublicTransport>(entity)) return false;
+            if (!EntityManager.HasComponent<PrefabRef>(entity)) return false;
+            PrefabRef prefabRef = EntityManager.GetComponentData<PrefabRef>(entity);
+            if (!EntityManager.HasComponent<PublicTransportVehicleData>(prefabRef.m_Prefab)) return false;
+            PublicTransportVehicleData vtd = EntityManager.GetComponentData<PublicTransportVehicleData>(prefabRef.m_Prefab);
+            return vtd.m_TransportType == TransportType.Taxi;
+        }
+
+        private void RerouteTaxi(Entity taxiEntity, Entity destinationBuilding)
+        {
+            if (!EntityManager.Exists(taxiEntity))
+            {
+                Mod.Log.Warn($"[TaxiReroute] Taxi entity {taxiEntity.Index} no longer exists, skipping");
+                return;
+            }
+
+            // Change destination target
+            if (EntityManager.HasComponent<Target>(taxiEntity))
+            {
+                Target target = EntityManager.GetComponentData<Target>(taxiEntity);
+                target.m_Entity = destinationBuilding;
+                EntityManager.SetComponentData(taxiEntity, target);
+            }
+
+            // Force path recalculation
+            if (EntityManager.HasComponent<PathOwner>(taxiEntity))
+            {
+                PathOwner pathOwner = EntityManager.GetComponentData<PathOwner>(taxiEntity);
+                pathOwner.m_State |= PathFlags.Obsolete;
+                EntityManager.SetComponentData(taxiEntity, pathOwner);
+            }
+
+            // Clear current dispatch request so TransportCarAISystem doesn't immediately override
+            if (EntityManager.HasComponent<PublicTransport>(taxiEntity))
+            {
+                PublicTransport pt = EntityManager.GetComponentData<PublicTransport>(taxiEntity);
+                pt.m_TargetRequest = Entity.Null;
+                EntityManager.SetComponentData(taxiEntity, pt);
+            }
+
+            Mod.Log.Info($"[TaxiReroute] Rerouted taxi {taxiEntity.Index} → building {destinationBuilding.Index}");
         }
 
         private void CreateAreaCrimeDispatch(Entity clickedBuilding)

@@ -8,12 +8,14 @@ import {
     crimeEnabled$,
     accidentEnabled$,
     areaCrimeEnabled$,
+    taxiRerouteEnabled$,
     togglePolice,
     toggleFire,
     toggleEMS,
     toggleCrime,
     toggleAccident,
     toggleAreaCrime,
+    toggleTaxiReroute,
 } from "./bindings";
 import styles from "./DispatchPanel.module.scss";
 
@@ -25,6 +27,7 @@ export const DispatchPanel = () => {
     const crimeOn = useValue(crimeEnabled$);
     const accidentOn = useValue(accidentEnabled$);
     const areaCrimeOn = useValue(areaCrimeEnabled$);
+    const taxiRerouteOn = useValue(taxiRerouteEnabled$);
 
     if (!visible) return null;
 
@@ -86,6 +89,15 @@ export const DispatchPanel = () => {
                     >
                         <img src="coui://uil/Standard/Crime.svg" className={styles.optionIcon} alt="Area Crime" />
                         <span>Area Crime</span>
+                    </Button>
+                    <Button
+                        variant="flat"
+                        className={`${styles.option} ${taxiRerouteOn ? styles.active : ""}`}
+                        selected={taxiRerouteOn}
+                        onSelect={toggleTaxiReroute}
+                    >
+                        <img src="coui://uil/Standard/Car.svg" className={styles.optionIcon} alt="Taxi Reroute" />
+                        <span>Taxi Reroute</span>
                     </Button>
                 </div>
             </div>

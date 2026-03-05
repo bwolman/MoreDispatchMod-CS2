@@ -25,6 +25,7 @@ namespace MoreDispatchMod.Systems
         private ValueBinding<bool> m_CrimeEnabled;
         private ValueBinding<bool> m_AccidentEnabled;
         private ValueBinding<bool> m_AreaCrimeEnabled;
+        private ValueBinding<bool> m_TaxiRerouteEnabled;
         private ValueBinding<bool> m_PanelVisible;
 
         protected override void OnCreate()
@@ -45,6 +46,7 @@ namespace MoreDispatchMod.Systems
             AddBinding(m_CrimeEnabled = new ValueBinding<bool>(kGroup, "CrimeEnabled", false));
             AddBinding(m_AccidentEnabled = new ValueBinding<bool>(kGroup, "AccidentEnabled", false));
             AddBinding(m_AreaCrimeEnabled = new ValueBinding<bool>(kGroup, "AreaCrimeEnabled", false));
+            AddBinding(m_TaxiRerouteEnabled = new ValueBinding<bool>(kGroup, "TaxiRerouteEnabled", false));
             AddBinding(m_PanelVisible = new ValueBinding<bool>(kGroup, "PanelVisible", false));
 
             // Trigger bindings (JS → C#)
@@ -55,8 +57,9 @@ namespace MoreDispatchMod.Systems
             AddBinding(new TriggerBinding(kGroup, "ToggleCrime", HandleToggleCrime));
             AddBinding(new TriggerBinding(kGroup, "ToggleAccident", HandleToggleAccident));
             AddBinding(new TriggerBinding(kGroup, "ToggleAreaCrime", HandleToggleAreaCrime));
+            AddBinding(new TriggerBinding(kGroup, "ToggleTaxiReroute", HandleToggleTaxiReroute));
 
-            Mod.Log.Info("[ManualDispatchUI] Bindings registered: IsToolActive, PoliceEnabled, FireEnabled, EMSEnabled, CrimeEnabled, AccidentEnabled, AreaCrimeEnabled, PanelVisible + all toggles");
+            Mod.Log.Info("[ManualDispatchUI] Bindings registered: IsToolActive, PoliceEnabled, FireEnabled, EMSEnabled, CrimeEnabled, AccidentEnabled, AreaCrimeEnabled, TaxiRerouteEnabled, PanelVisible + all toggles");
 
             // Track external tool changes (Escape key, other tool selected)
             m_ToolSystem.EventToolChanged += OnToolChanged;
@@ -126,9 +129,17 @@ namespace MoreDispatchMod.Systems
             DeactivateIfNoneEnabled();
         }
 
+        private void HandleToggleTaxiReroute()
+        {
+            m_DispatchTool.TaxiRerouteEnabled = !m_DispatchTool.TaxiRerouteEnabled;
+            m_TaxiRerouteEnabled.Update(m_DispatchTool.TaxiRerouteEnabled);
+            Mod.Log.Info($"[ManualDispatchUI] HandleToggleTaxiReroute → {m_DispatchTool.TaxiRerouteEnabled}");
+            DeactivateIfNoneEnabled();
+        }
+
         private void DeactivateIfNoneEnabled()
         {
-            if (!m_DispatchTool.PoliceEnabled && !m_DispatchTool.FireEnabled && !m_DispatchTool.EMSEnabled && !m_DispatchTool.CrimeEnabled && !m_DispatchTool.AccidentEnabled && !m_DispatchTool.AreaCrimeEnabled)
+            if (!m_DispatchTool.PoliceEnabled && !m_DispatchTool.FireEnabled && !m_DispatchTool.EMSEnabled && !m_DispatchTool.CrimeEnabled && !m_DispatchTool.AccidentEnabled && !m_DispatchTool.AreaCrimeEnabled && !m_DispatchTool.TaxiRerouteEnabled)
             {
                 if (m_ToolSystem.activeTool == m_DispatchTool)
                 {
@@ -153,12 +164,14 @@ namespace MoreDispatchMod.Systems
                 m_DispatchTool.CrimeEnabled = false;
                 m_DispatchTool.AccidentEnabled = false;
                 m_DispatchTool.AreaCrimeEnabled = false;
+                m_DispatchTool.TaxiRerouteEnabled = false;
                 m_PoliceEnabled.Update(false);
                 m_FireEnabled.Update(false);
                 m_EMSEnabled.Update(false);
                 m_CrimeEnabled.Update(false);
                 m_AccidentEnabled.Update(false);
                 m_AreaCrimeEnabled.Update(false);
+                m_TaxiRerouteEnabled.Update(false);
                 Mod.Log.Info("[ManualDispatchUI] Tool deactivated, all toggles reset");
             }
         }
